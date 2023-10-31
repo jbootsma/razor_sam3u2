@@ -1,5 +1,5 @@
 /*!**********************************************************************************************************************
-@file sam3u_uart.h                                                                
+@file sam3u_uart.h
 @brief Header file for sam3u_uart.c
 **********************************************************************************************************************/
 
@@ -11,11 +11,11 @@
 Type Definitions
 **********************************************************************************************************************/
 
-/*! 
+/*!
 @struct UartConfigurationType
-@brief Task-provided parameters for a UART 
+@brief Task-provided parameters for a UART
 */
-typedef struct 
+typedef struct
 {
   PeripheralType UartPeripheral;      /*!< @brief Easy name of peripheral */
   u16 u16RxBufferSize;                /*!< @brief Size of receive buffer in bytes */
@@ -24,13 +24,13 @@ typedef struct
   fnCode_type fnRxCallback;           /*!< @brief Callback function for receiving data */
 } UartConfigurationType;
 
-/*! 
+/*!
 @struct UartPeripheralType
-@brief Complete configuration parameters for a UART resource 
+@brief Complete configuration parameters for a UART resource
 */
-typedef struct 
+typedef struct
 {
-  AT91PS_USART pBaseAddress;          /*!< @brief Base address of the associated peripheral */
+  Usart* pBaseAddress;                /*!< @brief Base address of the associated peripheral */
   u32 u32PrivateFlags;                /*!< @brief Flags for peripheral */
   MessageType* psTransmitBuffer;      /*!< @brief Pointer to the transmit message linked list */
   u32 u32CurrentTxBytesRemaining;     /*!< @brief Counter for bytes remaining in current transfer */
@@ -54,7 +54,7 @@ typedef struct
 **********************************************************************************************************************/
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/*! @publicsection */                                                                                            
+/*! @publicsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 UartPeripheralType* UartRequest(UartConfigurationType* psUartConfig_);
 void UartRelease(UartPeripheralType* psUartPeripheral_);
@@ -64,7 +64,7 @@ u32 UartWriteData(UartPeripheralType* psUartPeripheral_, u32 u32Size_, u8* pu8Da
 
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */                                                                                            
+/*! @protectedsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 void UartInitialize(void);
 void UartRunActiveState(void);
@@ -78,7 +78,7 @@ void UART2_IRQHandler(void);
 
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/*! @privatesection */                                                                                            
+/*! @privatesection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 static void UartGenericHandler(void);
 
@@ -88,7 +88,7 @@ State Machine Declarations
 ***********************************************************************************************************************/
 static void UartSM_Idle(void);
 static void UartSM_Transmitting(void);
-static void UartSM_Error(void);         
+static void UartSM_Error(void);
 
 
 /**********************************************************************************************************************

@@ -1,5 +1,5 @@
 /*!**********************************************************************************************************************
-@file timer.c                                                                
+@file timer.c
 @brief Provide easy access to set up and run a Timer Counter (TC) Peripheral.
 
 ------------------------------------------------------------------------------------------------------------------------
@@ -18,7 +18,7 @@ PUBLIC FUNCTIONS
 - void TimerStop(TimerChannelType eTimerChannel_)
 - u16 TimerGetTime(TimerChannelType eTimerChannel_)
 - void TimerAssignCallback(TimerChannelType eTimerChannel_, fnCode_type fpUserCallback_)
- 
+
 PROTECTED FUNCTIONS
 - void TimerInitialize(void)
 - void TimerRunActiveState(void)
@@ -58,7 +58,7 @@ Function Definitions
 **********************************************************************************************************************/
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/*! @publicsection */                                                                                            
+/*! @publicsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
 /*!---------------------------------------------------------------------------------------------------------------------
@@ -71,7 +71,7 @@ the user knows this and u16TimerValue_ holds a multiple of 2.67us that is
 desired to be timed.
 
 Requires:
-- TimerStop should be called before, and TimerStart should be called after 
+- TimerStop should be called before, and TimerStart should be called after
 this function to reset the counter and avoid glitches.
 
 @param eTimerChannel_ holds a valid channel
@@ -83,13 +83,7 @@ Promises:
 */
 void TimerSet(TimerChannelType eTimerChannel_, u16 u16TimerValue_)
 {
-  /* Build the offset to the selected channel */
-  u32 u32TimerBaseAddress = (u32)AT91C_BASE_TC0;
-  u32TimerBaseAddress += (u32)eTimerChannel_;
-
-  /* Load the new timer value */
-  (AT91_CAST(AT91PS_TC)u32TimerBaseAddress)->TC_RC = (u32)(u16TimerValue_) & 0x0000FFFF;
-
+  TC0->TC_CHANNEL[eTimerChannel_].TC_RC = (u32)(u16TimerValue_) & 0x0000FFFF;
 } /* end TimerSet() */
 
 
@@ -108,13 +102,7 @@ Promises:
 */
 void TimerStart(TimerChannelType eTimerChannel_)
 {
-  /* Build the offset to the selected peripheral */
-  u32 u32TimerBaseAddress = (u32)AT91C_BASE_TC0;
-  u32TimerBaseAddress += (u32)eTimerChannel_;
-
-  /* Ensure clock is enabled and triggered */
-  (AT91_CAST(AT91PS_TC)u32TimerBaseAddress)->TC_CCR |= (AT91C_TC_CLKEN | AT91C_TC_SWTRG);
-  
+  TC0->TC_CHANNEL[eTimerChannel_].TC_CCR |= (TC_CCR_CLKEN | TC_CCR_SWTRG);
 } /* end TimerStart() */
 
 
@@ -133,13 +121,7 @@ Promises:
 */
 void TimerStop(TimerChannelType eTimerChannel_)
 {
-  /* Build the offset to the selected peripheral */
-  u32 u32TimerBaseAddress = (u32)AT91C_BASE_TC0;
-  u32TimerBaseAddress += (u32)eTimerChannel_;
-  
-  /* Ensure clock is disabled */
-  (AT91_CAST(AT91PS_TC)u32TimerBaseAddress)->TC_CCR |= AT91C_TC_CLKDIS;
-  
+  TC0->TC_CHANNEL[eTimerChannel_].TC_CCR = TC_CCR_CLKDIS;
 } /* end TimerStop */
 
 
@@ -157,13 +139,7 @@ Promises:
 */
 u16 TimerGetTime(TimerChannelType eTimerChannel_)
 {
-  /* Build the offset to the selected peripheral */
-  u32 u32TimerBaseAddress = (u32)AT91C_BASE_TC0;
-  u32TimerBaseAddress += (u32)eTimerChannel_;
-  
-  /* Read and format the timer count */
-  return ((u16)( (AT91_CAST(AT91PS_TC)u32TimerBaseAddress)->TC_CV & 0x0000FFFF));
-  
+  return (u16)(TC0->TC_CHANNEL[eTimerChannel_].TC_CV & 0x0000FFFF);
 } /* end TimerGetTime */
 
 
@@ -202,12 +178,12 @@ void TimerAssignCallback(TimerChannelType eTimerChannel_, fnCode_type fpUserCall
       break;
     }
   } /* end switch(eTimerChannel_) */
-  
+
 } /* end TimerAssignCallback */
 
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */                                                                                            
+/*! @protectedsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
 /*!--------------------------------------------------------------------------------------------------------------------
@@ -225,16 +201,16 @@ Promises:
 void TimerInitialize(void)
 {
   /* Load the block configuration registers */
-  AT91C_BASE_TCB0->TCB_BMR = TCB_BMR_INIT;
- 
+  TC0->TC_BMR = TCB_BMR_INIT;
+
   /* Channel 0 and 2 settings not configured at this time */
 
   /* Load Channel 1 settings and set the default callback */
-  AT91C_BASE_TC1->TC_CMR = TC1_CMR_INIT;
-  AT91C_BASE_TC1->TC_RC  = TC1_RC_INIT;
-  AT91C_BASE_TC1->TC_IER = TC1_IER_INIT;
-  AT91C_BASE_TC1->TC_IDR = TC1_IDR_INIT;
-  AT91C_BASE_TC1->TC_CCR = TC1_CCR_INIT;
+  TC0->TC_CHANNEL[1].TC_CMR = TC1_CMR_INIT;
+  TC0->TC_CHANNEL[1].TC_RC  = TC1_RC_INIT;
+  TC0->TC_CHANNEL[1].TC_IER = TC1_IER_INIT;
+  TC0->TC_CHANNEL[1].TC_IDR = TC1_IDR_INIT;
+  TC0->TC_CHANNEL[1].TC_CCR = TC1_CCR_INIT;
 
   Timer_fpTimer1Callback = TimerDefaultCallback;
 
@@ -242,11 +218,11 @@ void TimerInitialize(void)
   if( 1 )
   {
     /* Enable required interrupts */
-    NVIC_ClearPendingIRQ(IRQn_TC1);
-    NVIC_EnableIRQ(IRQn_TC1);
+    NVIC_ClearPendingIRQ(TC1_IRQn);
+    NVIC_EnableIRQ(TC1_IRQn);
     Timer_fpStateMachine = TimerSM_Idle;
     DebugPrintf("Timer1 initialized\n\r");
-    
+
     /* Flag that the Timer task is ready */
     G_u32ApplicationFlags |= _APPLICATION_FLAGS_TIMER;
   }
@@ -258,7 +234,7 @@ void TimerInitialize(void)
 
 } /* end TimerInitialize() */
 
-  
+
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn void TimerRunActiveState(void)
 
@@ -284,10 +260,10 @@ void TimerRunActiveState(void)
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn void TC1_IrqHandler(void)
 
-@brief Parses the TC1 interrupts and handles them appropriately.  
+@brief Parses the TC1 interrupts and handles them appropriately.
 
-Note that all enabled TC1 interrupts are ORed and will trigger this handler, 
-therefore any expected interrupt that is enabled must be parsed out 
+Note that all enabled TC1 interrupts are ORed and will trigger this handler,
+therefore any expected interrupt that is enabled must be parsed out
 and handled.
 
 Requires:
@@ -299,44 +275,44 @@ If Channel1 RC interrupt:
 - Timer Channel 1 is reset and automatically restarts counting
 - AT91C_TC_CPCS is cleared
 - Associated callback function is invoked
-- IRQn_TC1 interrupt flag is cleared
+- TC1_IRQn interrupt flag is cleared
 
 */
 void TC1_IrqHandler(void)
 {
   /* Check for RC compare interrupt - reading TC_SR clears the bit if set */
-  if(AT91C_BASE_TC1->TC_SR & AT91C_TC_CPCS)
+  if(TC0->TC_CHANNEL[1].TC_SR & TC_SR_CPCS)
   {
     Timer_u32Timer1IntCounter++;
     Timer_fpTimer1Callback();
   }
 
   /* Clear the TC pending flag and exit */
-  NVIC_ClearPendingIRQ(IRQn_TC1);
-  
+  NVIC_ClearPendingIRQ(TC1_IRQn);
+
 } /* end TC1_IrqHandler() */
 
 
 /*------------------------------------------------------------------------------------------------------------------*/
-/*! @privatesection */                                                                                            
+/*! @privatesection */
 /*--------------------------------------------------------------------------------------------------------------------*/
-  
+
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn static void TimerDefaultCallback(void)
 
-@brief An empty function that the Timer Callback points to.  Expected that the 
+@brief An empty function that the Timer Callback points to.  Expected that the
 user will set their own.
 
 Requires:
-- NONE 
+- NONE
 
 Promises:
-- NONE 
+- NONE
 
 */
 static void TimerDefaultCallback(void)
 {
-  
+
 } /* end TimerDefaultCallback() */
 
 
@@ -347,18 +323,18 @@ State Machine Function Definitions
 /*!-------------------------------------------------------------------------------------------------------------------
 @fn static void TimerSM_Idle(void)
 
-@brief Wait for a message to be queued 
+@brief Wait for a message to be queued
 */static void TimerSM_Idle(void)
 {
-   
+
 } /* end TimerSM_Idle() */
-     
+
 
 /*-------------------------------------------------------------------------------------------------------------------*/
 /* Handle an error */
-static void TimerSM_Error(void)          
+static void TimerSM_Error(void)
 {
-  
+
 } /* end TimerSM_Error() */
 
 

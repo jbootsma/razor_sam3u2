@@ -31,7 +31,7 @@ import waflib.Utils as Utils
 ConfMod.autoconfig = True
 
 # TODO: Remaining tasks
-# - Move non-command functinos to tool, or make private so that they stop polluting the help text.
+# - Move non-command functions to tool, or make private so that they stop polluting the help text.
 
 # The following functions implement waf commands. You can define arbitrary commands here (see the
 # waf book) but we only use standard ones. If you don't specify one waf uses "build" by default,
@@ -198,6 +198,10 @@ def build(ctx):
 
     source = []
     includes = []
+    defines = [
+        "DONT_USE_CMSIS_INIT",
+        "EIE_ASCII",
+    ]
 
     for folder in work_folders:
         source += ctx.srcnode.ant_glob(f"{folder}/*.s")  # assembly files
@@ -215,10 +219,10 @@ def build(ctx):
         features="mapfile ihex",
         source=source,
         includes=includes,
+        defines=defines,
         cflags=cflags,
         asflags=asflags,
         linkflags=linkflags,
-        defines=["EIE_ASCII"],
         linker_script="firmware_common/bsp/sam3u2.ld",
     )
 

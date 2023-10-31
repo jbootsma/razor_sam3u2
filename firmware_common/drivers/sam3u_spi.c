@@ -1,6 +1,6 @@
 /*!**********************************************************************************************************************
-@file sam3u_spi.c                                                                
-@brief Provides a driver to use the dedicated SPI peripheral to send and 
+@file sam3u_spi.c
+@brief Provides a driver to use the dedicated SPI peripheral to send and
 receive data using interrupts.
 
 ------------------------------------------------------------------------------------------------------------------------
@@ -71,19 +71,19 @@ Function Definitions
 ***********************************************************************************************************************/
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/*! @publicsection */                                                                                            
+/*! @publicsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
 /*!---------------------------------------------------------------------------------------------------------------------
 @fn SpiPeripheralType* SpiRequest(SpiConfigurationType* psSpiConfig_)
 
-@brief Requests access to an SPI resource.  
+@brief Requests access to an SPI resource.
 
 If the resource is available, the transmit and receive parameters are set up
-and the peripheral is made ready to use in the application. The peripheral will be 
+and the peripheral is made ready to use in the application. The peripheral will be
 configured in different ways for different SPI modes.  The following modes are supported:
 
-SPI_MASTER: transmit and receive using peripheral registers on byte-wise basis using 
+SPI_MASTER: transmit and receive using peripheral registers on byte-wise basis using
 interrupts.  Transmit is initiated through Message task.  Receive is based on
 queued Rx bytes.  Master receive is non-circular.  The Rx buffer is initialized
 to SPI_DUMMY_BYTE and is the source for the transmit dummies.
@@ -93,8 +93,8 @@ Transmit is initiated through Message.  Receive set up per-byte using peripheral
 registers and interrupts and assumes a circular Rx buffer.
 
 Requires:
-- SPI peripheral register initialization values in configuration.h must be set 
-  correctly; currently this does not support different SPI configurations 
+- SPI peripheral register initialization values in configuration.h must be set
+  correctly; currently this does not support different SPI configurations
   for multiple Slaves on the same bus - all peripherals on the bus must work with
   the same setup.
 
@@ -115,8 +115,8 @@ SpiPeripheralType* SpiRequest(SpiConfigurationType* psSpiConfig_)
   }
 
   /* Activate and configure the peripheral */
-  AT91C_BASE_PMC->PMC_PCER |= (1 << SPI_Peripheral0.u8PeripheralId);
-  
+  PMC->PMC_PCER0 |= (1 << SPI_Peripheral0.u8PeripheralId);
+
   SPI_Peripheral0.pCsGpioAddress   = psSpiConfig_->pCsGpioAddress;
   SPI_Peripheral0.u32CsPin         = psSpiConfig_->u32CsPin;
   SPI_Peripheral0.eBitOrder        = psSpiConfig_->eBitOrder;
@@ -125,7 +125,7 @@ SpiPeripheralType* SpiRequest(SpiConfigurationType* psSpiConfig_)
   SPI_Peripheral0.ppu8RxNextByte   = psSpiConfig_->ppu8RxNextByte;
   SPI_Peripheral0.u16RxBufferSize  = psSpiConfig_->u16RxBufferSize;
   SPI_Peripheral0.u32PrivateFlags |= _SPI_PERIPHERAL_ASSIGNED;
-   
+
   SPI_Peripheral0.pBaseAddress->SPI_CR  = SPI0_CR_INIT;
   SPI_Peripheral0.pBaseAddress->SPI_MR  = SPI0_MR_INIT;
   SPI_Peripheral0.pBaseAddress->SPI_IER = SPI0_IER_INIT;
@@ -135,7 +135,7 @@ SpiPeripheralType* SpiRequest(SpiConfigurationType* psSpiConfig_)
   SPI_Peripheral0.pBaseAddress->SPI_CSR[1] = SPI0_CSR1_INIT;
   SPI_Peripheral0.pBaseAddress->SPI_CSR[2] = SPI0_CSR2_INIT;
   SPI_Peripheral0.pBaseAddress->SPI_CSR[3] = SPI0_CSR3_INIT;
-  
+
   /* Special considerations for SPI Slaves */
   if(SPI_Peripheral0.eSpiMode == SPI_SLAVE)
   {
@@ -146,28 +146,28 @@ SpiPeripheralType* SpiRequest(SpiConfigurationType* psSpiConfig_)
     SPI_Peripheral0.pBaseAddress->SPI_TDR = *SPI_Peripheral0.pu8CurrentTxData;
 
     /* Enable the transmit and receive interrupts and the SPI peripheral in case the Master starts clocking */
-    SPI_Peripheral0.pBaseAddress->SPI_IER = (AT91C_SPI_TDRE | AT91C_SPI_RDRF);
-    SPI_Peripheral0.pBaseAddress->SPI_CR = AT91C_SPI_SPIEN;
+    SPI_Peripheral0.pBaseAddress->SPI_IER = (SPI_IER_TDRE | SPI_IER_RDRF);
+    SPI_Peripheral0.pBaseAddress->SPI_CR = SPI_CR_SPIEN;
   }
-  
+
   /* Enable SPI interrupts */
   NVIC_ClearPendingIRQ( (IRQn_Type)SPI_Peripheral0.u8PeripheralId );
   NVIC_EnableIRQ( (IRQn_Type)SPI_Peripheral0.u8PeripheralId );
-  
+
   return(&SPI_Peripheral0);
-  
+
 } /* end SpiRequest() */
 
 
 /*!---------------------------------------------------------------------------------------------------------------------
 @fn void SpiRelease(SpiPeripheralType* psSpiPeripheral_)
 
-@brief Releases an SPI resource.  
+@brief Releases an SPI resource.
 
 Requires:
 - Receive operation is not in progress
 
-@param psSpiPeripheral_ has the SPI peripheral number, address of the RxBuffer, 
+@param psSpiPeripheral_ has the SPI peripheral number, address of the RxBuffer,
 and the RxBuffer size.
 
 Promises:
@@ -183,40 +183,40 @@ void SpiRelease(SpiPeripheralType* psSpiPeripheral_)
   {
     return;
   }
-  
+
   /* Disable interrupts */
   NVIC_DisableIRQ( (IRQn_Type)(psSpiPeripheral_->u8PeripheralId) );
   NVIC_ClearPendingIRQ( (IRQn_Type)(psSpiPeripheral_->u8PeripheralId) );
- 
+
   /* Now it's safe to release all of the resources in the target peripheral */
   psSpiPeripheral_->pCsGpioAddress  = NULL;
   psSpiPeripheral_->pu8RxBuffer     = NULL;
   psSpiPeripheral_->ppu8RxNextByte  = NULL;
   psSpiPeripheral_->u32PrivateFlags = 0;
-  
+
   /* Empty the transmit buffer if there were leftover messages */
   while(psSpiPeripheral_->psTransmitBuffer != NULL)
   {
     UpdateMessageStatus(psSpiPeripheral_->psTransmitBuffer->u32Token, ABANDONED);
     DeQueueMessage(&psSpiPeripheral_->psTransmitBuffer);
   }
-  
+
 } /* end SpiRelease() */
 
 
 /*!---------------------------------------------------------------------------------------------------------------------
 @fn u32 SpiWriteByte(SpiPeripheralType* psSpiPeripheral_, u8 u8Byte_)
 
-@brief Queues a single byte for transfer on the target SPI peripheral.  
+@brief Queues a single byte for transfer on the target SPI peripheral.
 
 Requires:
 @param psSpiPeripheral_ is the SPI peripheral to use and it has already been requested.
 @param u8Byte_ is the byte to send
 
 Promises:
-- Creates a 1-byte message at psSpiPeripheral_->psTransmitBuffer that will be sent 
+- Creates a 1-byte message at psSpiPeripheral_->psTransmitBuffer that will be sent
   by the SPI application when it is available.
-- Returns the message token assigned to the message; 0 is returned if the message 
+- Returns the message token assigned to the message; 0 is returned if the message
   cannot be queued in which case G_u32MessagingFlags can be checked for the reason
 
 */
@@ -224,7 +224,7 @@ u32 SpiWriteByte(SpiPeripheralType* psSpiPeripheral_, u8 u8Byte_)
 {
   u32 u32Token;
   u8 u8Data = u8Byte_;
-  
+
   /* Attempt to queue message and get a response token */
   u32Token = QueueMessage(&psSpiPeripheral_->psTransmitBuffer, 1, &u8Data);
   if( u32Token != 0 )
@@ -236,16 +236,16 @@ u32 SpiWriteByte(SpiPeripheralType* psSpiPeripheral_, u8 u8Byte_)
       SpiManualMode();
     }
   }
-  
+
   return(u32Token);
-  
+
 } /* end SpiWriteByte() */
 
 
 /*!--------------------------------------------------------------------------------------------------------------------
 @fn u32 SpiWriteData(SpiPeripheralType* psSpiPeripheral_, u32 u32Size_, u8* pu8Data_)
 
-@brief Queues a data array for transfer on the target SPI peripheral.  
+@brief Queues a data array for transfer on the target SPI peripheral.
 
 Requires:
 @param psSpiPeripheral_ is the SPI peripheral to use and it has already been requested.
@@ -255,7 +255,7 @@ Requires:
 Promises:
 - adds the data message at psSpiPeripheral_->psTransmitBuffer that will be sent by the SPI application
   when it is available.
-- Returns the message token assigned to the message; 0 is returned if the message 
+- Returns the message token assigned to the message; 0 is returned if the message
   cannot be queued in which case G_u32MessagingFlags can be checked for the reason
 
 */
@@ -275,7 +275,7 @@ u32 SpiWriteData(SpiPeripheralType* psSpiPeripheral_, u32 u32Size_, u8* pu8Data_
   {
     return(0);
   }
-  
+
   /* If the system is initializing, manually cycle the SPI task through one iteration to send the message */
   if(G_u32SystemFlags & _SYSTEM_INITIALIZING)
   {
@@ -290,11 +290,11 @@ u32 SpiWriteData(SpiPeripheralType* psSpiPeripheral_, u32 u32Size_, u8* pu8Data_
 /*!--------------------------------------------------------------------------------------------------------------------
 @fn bool SpiReadByte(SpiPeripheralType* psSpiPeripheral_)
 
-@brief Master mode only.  Queues a request for a single byte from the Slave on 
+@brief Master mode only.  Queues a request for a single byte from the Slave on
 the target SPI peripheral.  There cannot be pending writes.
 
 Requires:
-- Master mode 
+- Master mode
 
 @param psSpiPeripheral_ is the SPI peripheral to use and it has already been requested.
 
@@ -317,21 +317,21 @@ bool SpiReadByte(SpiPeripheralType* psSpiPeripheral_)
   {
     return FALSE;
   }
-  
+
   /* Load the counter and return success */
   psSpiPeripheral_->u16RxBytes = 1;
   return TRUE;
-  
+
 } /* end SpiReadByte() */
 
 
 /*!--------------------------------------------------------------------------------------------------------------------
 @fn bool SpiReadData(SpiPeripheralType* psSpiPeripheral_, u16 u16Size_)
 
-@brief Master mode only. Prepares to get multiple bytes from the Slave on the target SPI peripheral.  
+@brief Master mode only. Prepares to get multiple bytes from the Slave on the target SPI peripheral.
 
 Requires:
-- Master mode 
+- Master mode
 
 @param psSpiPeripheral_ is the SPI peripheral to use and it has already been requested.
 @param u16Size_ is the number of bytes to receive
@@ -361,11 +361,11 @@ bool SpiReadData(SpiPeripheralType* psSpiPeripheral_, u16 u16Size_)
     DebugPrintf("\r\nSPI message too large\n\r");
     return FALSE;
   }
-  
+
   /* Load the counter and return success */
   psSpiPeripheral_->u16RxBytes = u16Size_;
   return TRUE;
-    
+
 } /* end SpiReadData() */
 
 
@@ -416,18 +416,18 @@ SpiRxStatusType SpiQueryReceiveStatus(SpiPeripheralType* psSpiPeripheral_)
       return SPI_RX_WAITING;
     }
   }
-  
+
 } /* end SpiQueryReceiveStatus() */
 
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */                                                                                            
+/*! @protectedsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
 /*!--------------------------------------------------------------------------------------------------------------------
 @fn void SpiInitialize(void)
 
-@brief Initializes the SPI application and its variables.  
+@brief Initializes the SPI application and its variables.
 
 The peripheral is not configured until requested by a calling application.
 
@@ -435,15 +435,15 @@ Requires:
 - NONE
 
 Promises:
-- SPI peripheral object is ready 
+- SPI peripheral object is ready
 - SPI application set to Idle
 
 */
 void SpiInitialize(void)
 {
   /* Initialize the SPI peripheral structures */
-  SPI_Peripheral0.pBaseAddress     = AT91C_BASE_SPI0;
-  SPI_Peripheral0.u8PeripheralId   = AT91C_ID_SPI0;
+  SPI_Peripheral0.pBaseAddress     = SPI;
+  SPI_Peripheral0.u8PeripheralId   = ID_SPI;
   SPI_Peripheral0.pCsGpioAddress   = NULL;
   SPI_Peripheral0.psTransmitBuffer = NULL;
   SPI_Peripheral0.pu8RxBuffer      = NULL;
@@ -454,7 +454,7 @@ void SpiInitialize(void)
   /* Clear all flags */
   SPI_u32Flags = 0;
   G_u32Spi0ApplicationFlags = 0;
-  
+
   /* Set application pointer */
   Spi_pfnStateMachine = SpiSM_Idle;
   DebugPrintf("SPI Peripheral Ready\n\r");
@@ -501,21 +501,21 @@ Promises:
 void SpiManualMode(void)
 {
   u32 u32Timer;
-  
+
   /* Set up for manual mode */
   SPI_u32Flags |= _SPI_MANUAL_MODE;
 
-  /* Run the SPI state machine so all SPI peripherals send their current message */  
+  /* Run the SPI state machine so all SPI peripherals send their current message */
   while(SPI_u32Flags & _SPI_MANUAL_MODE)
   {
     WATCHDOG_BONE();
     Spi_pfnStateMachine();
     MessagingRunActiveState();
-    
+
     u32Timer = G_u32SystemTime1ms;
     while( !IsTimeUp(&u32Timer, 1) );
   }
-      
+
 } /* end SpiManualMode() */
 
 
@@ -528,7 +528,7 @@ Requires:
 - None
 
 Promises:
-- Each interrupt has different outcomes for the system depending on the SPI mode.  
+- Each interrupt has different outcomes for the system depending on the SPI mode.
   See each section for more details.
 
 */
@@ -541,8 +541,8 @@ void SPI0_IrqHandler(void)
   u32Current_SR = SPI_Peripheral0.pBaseAddress->SPI_SR;
 
   /*** SPI ISR receive handling (RDRF) for Master and Slave ***/
-  if( (SPI_Peripheral0.pBaseAddress->SPI_IMR & AT91C_SPI_RDRF) && 
-      (u32Current_SR & AT91C_SPI_RDRF) )
+  if( (SPI_Peripheral0.pBaseAddress->SPI_IMR & SPI_IMR_RDRF) &&
+      (u32Current_SR & SPI_SR_RDRF) )
   {
     /* Master mode has special conditions if receiving a known number of bytes */
     if( (SPI_Peripheral0.eSpiMode == SPI_MASTER) &&
@@ -550,24 +550,24 @@ void SPI0_IrqHandler(void)
     {
       /* Decrement counter and read the byte */
       SPI_Peripheral0.u16RxBytes--;
-      
+
       /* Check if reception is complete */
       if(SPI_Peripheral0.u16RxBytes == 0)
       {
         /* Reset the byte counter and clear the RX flag */
         SPI_Peripheral0.u32PrivateFlags &= ~_SSP_PERIPHERAL_RX;
         SPI_Peripheral0.u32PrivateFlags |=  _SSP_PERIPHERAL_RX_COMPLETE;
-             
+
         /* Disable the receive interrupt */
-        SPI_Peripheral0.pBaseAddress->SPI_IDR = AT91C_SPI_RDRF;
+        SPI_Peripheral0.pBaseAddress->SPI_IDR = SPI_IDR_RDRF;
 
         /* Disable the SPI peripheral since the transfer must now be complete */
-        SPI_Peripheral0.pBaseAddress->SPI_CR = AT91C_SPI_SPIDIS;
+        SPI_Peripheral0.pBaseAddress->SPI_CR = SPI_CR_SPIDIS;
       }
     }
-        
+
     /* Common receive functionality */
-      
+
     /* Read the received byte */
     u32Byte = 0x000000FF & SPI_Peripheral0.pBaseAddress->SPI_RDR;
 
@@ -578,20 +578,20 @@ void SPI0_IrqHandler(void)
     }
 
     /* Put the byte in the client's Rx buffer */
-    **(SPI_Peripheral0.ppu8RxNextByte) = (u8)u32Byte; 
+    **(SPI_Peripheral0.ppu8RxNextByte) = (u8)u32Byte;
 
     /* Update the pointer to the next valid Rx location (account for Slave's circular buffer) */
     (*SPI_Peripheral0.ppu8RxNextByte)++;
     if( *SPI_Peripheral0.ppu8RxNextByte == (SPI_Peripheral0.pu8RxBuffer + (u32)SPI_Peripheral0.u16RxBufferSize) )
     {
-      *SPI_Peripheral0.ppu8RxNextByte = SPI_Peripheral0.pu8RxBuffer;  
+      *SPI_Peripheral0.ppu8RxNextByte = SPI_Peripheral0.pu8RxBuffer;
     }
   } /* end AT91C_SPI_RDRF handling */
 
 
   /*** SPI ISR transmit handling (TDRE) for Master and Slave ***/
-  if( (SPI_Peripheral0.pBaseAddress->SPI_IMR & AT91C_SPI_TDRE) && 
-      (u32Current_SR & AT91C_SPI_TDRE) )
+  if( (SPI_Peripheral0.pBaseAddress->SPI_IMR & SPI_IMR_TDRE) &&
+      (u32Current_SR & SPI_SR_TDRE) )
   {
     /* Decrement counter and check if Tx is complete */
     SPI_Peripheral0.u32CurrentTxBytesRemaining--;
@@ -606,56 +606,56 @@ void SPI0_IrqHandler(void)
       {
         u32Byte = __RBIT(u32Byte) >> 24;
       }
-    
+
       /* Load register (clears interrupt flag) */
-      SPI_Peripheral0.pBaseAddress->SPI_TDR = (u8)u32Byte; 
+      SPI_Peripheral0.pBaseAddress->SPI_TDR = (u8)u32Byte;
     }
     else
     {
       /* Done! Disable TX interrupt */
-      SPI_Peripheral0.pBaseAddress->SPI_IDR = AT91C_SPI_TDRE;
-      
+      SPI_Peripheral0.pBaseAddress->SPI_IDR = SPI_IDR_TDRE;
+
       /* If this was a transmit operation, clean up the message status and flags */
       if(SPI_Peripheral0.u32PrivateFlags & _SPI_PERIPHERAL_TX)
       {
-        SPI_Peripheral0.u32PrivateFlags &= ~_SPI_PERIPHERAL_TX;  
-        G_u32Spi0ApplicationFlags |= _SPI_TX_COMPLETE; 
+        SPI_Peripheral0.u32PrivateFlags &= ~_SPI_PERIPHERAL_TX;
+        G_u32Spi0ApplicationFlags |= _SPI_TX_COMPLETE;
         UpdateMessageStatus(SPI_Peripheral0.psTransmitBuffer->u32Token, COMPLETE);
         DeQueueMessage(&SPI_Peripheral0.psTransmitBuffer);
       }
     }
   } /* end AT91C_SPI_TDRE */
-  
+
 } /* end SPI0_IrqHandler() */
 
 
 
 /*----------------------------------------------------------------------------------------------------------------------*/
-/*! @privatesection */                                                                                            
+/*! @privatesection */
 /*----------------------------------------------------------------------------------------------------------------------*/
 
 
 /***********************************************************************************************************************
 State Machine Function Definitions
 
-The SPI state machine monitors messaging activity on the SPI Master peripheral.  
-It manages all SPI outgoing messages and will transmit any message that has been queued.  
+The SPI state machine monitors messaging activity on the SPI Master peripheral.
+It manages all SPI outgoing messages and will transmit any message that has been queued.
 ***********************************************************************************************************************/
 
 /*!-------------------------------------------------------------------------------------------------------------------
 @fn static void SpiSM_Idle(void)
 
-@brief Wait for a transmit message to be queued -- this can include a dummy transmission 
+@brief Wait for a transmit message to be queued -- this can include a dummy transmission
 to receive bytes.
-Half duplex transmissions are always assumed. Check one peripheral per iteration. 
+Half duplex transmissions are always assumed. Check one peripheral per iteration.
 
 */
 static void SpiSM_Idle(void)
 {
   u32 u32Byte;
 
-  if( ( (SPI_Peripheral0.psTransmitBuffer != NULL) || (SPI_Peripheral0.u16RxBytes !=0) ) && 
-     !(SPI_Peripheral0.u32PrivateFlags & (_SPI_PERIPHERAL_TX | _SPI_PERIPHERAL_RX) ) 
+  if( ( (SPI_Peripheral0.psTransmitBuffer != NULL) || (SPI_Peripheral0.u16RxBytes !=0) ) &&
+     !(SPI_Peripheral0.u32PrivateFlags & (_SPI_PERIPHERAL_TX | _SPI_PERIPHERAL_RX) )
     )
   {
     /* Receiving (Master only): Check if the message is receiving based on expected byte count.
@@ -663,69 +663,69 @@ static void SpiSM_Idle(void)
     if(SPI_Peripheral0.u16RxBytes !=0)
     {
       /* Receiving: flag that the peripheral is now busy */
-      SPI_Peripheral0.u32PrivateFlags |= _SPI_PERIPHERAL_RX;    
-      
+      SPI_Peripheral0.u32PrivateFlags |= _SPI_PERIPHERAL_RX;
+
       /* Initialize the receive buffer so we can see data changes but also so we send
       predictable dummy bytes since we'll point to this buffer to source the transmit dummies */
       memset(SPI_Peripheral0.pu8RxBuffer, SPI_DUMMY, SPI_Peripheral0.u16RxBufferSize);
-      
+
       /* Transmit drives the receive operation, so set it up */
       SPI_Peripheral0.u32CurrentTxBytesRemaining = SPI_Peripheral0.u16RxBytes;
       SPI_Peripheral0.pu8CurrentTxData = SPI_Peripheral0.pu8RxBuffer;
       SPI_Peripheral0.pBaseAddress->SPI_TDR = *SPI_Peripheral0.pu8CurrentTxData;
-      
+
       /* Enable the SPI peripheral */
-      SPI_Peripheral0.pBaseAddress->SPI_CR = AT91C_SPI_SPIEN;
+      SPI_Peripheral0.pBaseAddress->SPI_CR = SPI_CR_SPIEN;
 
       /* Make sure RDR is clear then enable the transmit and receive interrupts */
       u32Byte = SPI_Peripheral0.pBaseAddress->SPI_RDR;
-      SPI_Peripheral0.pBaseAddress->SPI_IER = (AT91C_SPI_TDRE | AT91C_SPI_RDRF);
+      SPI_Peripheral0.pBaseAddress->SPI_IER = (SPI_IER_TDRE | SPI_IER_RDRF);
 
-      
+
     } /* end of receive function */
     else
     {
       /* Transmitting: update the message's status and flag that the peripheral is now busy */
       UpdateMessageStatus(SPI_Peripheral0.psTransmitBuffer->u32Token, SENDING);
-      SPI_Peripheral0.u32PrivateFlags |= _SPI_PERIPHERAL_TX;    
-      
+      SPI_Peripheral0.u32PrivateFlags |= _SPI_PERIPHERAL_TX;
+
       /* Load in the message parameters. */
       SPI_Peripheral0.u32CurrentTxBytesRemaining = SPI_Peripheral0.psTransmitBuffer->u32Size;
       SPI_Peripheral0.pu8CurrentTxData = SPI_Peripheral0.psTransmitBuffer->pu8Message;
-       
+
       /* Load first byte.  If we need LSB first, use inline assembly to flip bits with a single instruction. */
       u32Byte = 0x000000FF &  *SPI_Peripheral0.pu8CurrentTxData;
       if(SPI_Peripheral0.eBitOrder == SPI_LSB_FIRST)
       {
         u32Byte = __RBIT(u32Byte) >> 24;
       }
-       
+
       /* Enable the SPI peripheral, load the byte, then enable interrupts */
-      SPI_Peripheral0.pBaseAddress->SPI_CR = AT91C_SPI_SPIEN;
-      SPI_Peripheral0.pBaseAddress->SPI_TDR = (u8)u32Byte; 
-      SPI_Peripheral0.pBaseAddress->SPI_IER = (AT91C_SPI_TDRE | AT91C_SPI_RDRF);
-      
+      SPI_Peripheral0.pBaseAddress->SPI_CR = SPI_CR_SPIEN;
+      SPI_Peripheral0.pBaseAddress->SPI_TDR = (u8)u32Byte;
+      SPI_Peripheral0.pBaseAddress->SPI_IER = (SPI_IER_TDRE | SPI_IER_RDRF);
+
     } /* end of transmitting function */
-    
+
   } /* end if */
-  
+
 } /* end SpiSM_Idle() */
 
 
 #if 0
 /*!-------------------------------------------------------------------------------------------------------------------
-@fn static void SpiSM_Error(void)          
+@fn static void SpiSM_Error(void)
 
-@brief Handle an error 
+@brief Handle an error
 
 */
-static void SpiSM_Error(void)          
+static void SpiSM_Error(void)
 {
   Spi_pfnStateMachine = SpiSM_Idle;
-  
+
 } /* end SpiSM_Error() */
 #endif
-        
+
 
 
 

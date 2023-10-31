@@ -1,5 +1,5 @@
 /*!*********************************************************************************************************************
-@file interrupts.c                                                               
+@file interrupts.c
 @brief Definitions for main system interrupts.
 
 ------------------------------------------------------------------------------------------------------------------------
@@ -10,12 +10,12 @@ CONSTANTS
 - NONE
 
 TYPES
-- 
+-
 PUBLIC FUNCTIONS
 - NONE
 
 PROTECTED FUNCTIONS
-- 
+-
 
 
 ***********************************************************************************************************************/
@@ -48,7 +48,7 @@ Interrupt Service Routine Definitions
 ***********************************************************************************************************************/
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */                                                                                            
+/*! @protectedsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
 /*!----------------------------------------------------------------------------------------------------------------------
@@ -59,44 +59,49 @@ Interrupt Service Routine Definitions
 Peripheral interrupt sources should be enabled outside of this function.
 As this should be the first interrupt-related function that is called in
 the system, we can conclude that clearing all the pending flags should
-work since no peripheral interrupt sources should be connected yet. 
+work since no peripheral interrupt sources should be connected yet.
 
 Requires:
 - IRQn_Type enum is the sequentially ordered interrupt values starting at 0
 
 Promises:
-- Interrupt priorities are set 
+- Interrupt priorities are set
 - All NVIC interrupts are disabled and all pending flags are cleared
 
 */
 void InterruptSetup(void)
 {
-  static const u32 au32PriorityConfig[PRIORITY_REGISTERS] = {IPR0_INIT, IPR1_INIT, IPR2_INIT, 
+  static const u32 au32PriorityConfig[PRIORITY_REGISTERS] = {IPR0_INIT, IPR1_INIT, IPR2_INIT,
                                                              IPR3_INIT, IPR4_INIT, IPR5_INIT,
                                                              IPR6_INIT, IPR7_INIT};
-  
+
   /* Disable all interrupts and ensure pending bits are clear */
   for(u8 i = 0; i < U8_SAM3U2_INTERRUPT_SOURCES; i++)
   {
     NVIC_DisableIRQ( (IRQn_Type)i );
     NVIC_ClearPendingIRQ( (IRQn_Type)i);
-  } 
+  }
+
+  // HACK: modern CMSIS treats the registers as 8-bit registers, and really encourages using
+  // NVIC_SetPriority and friends instead. I didn't want to change the existing code too
+  // drastically, so for now use a cast to get the old behavior back.
+  __IOM u32* pu32PrioRegs = (__IOM u32*)(&NVIC->IP);
 
   /* Set interrupt priorities */
   for(u8 i = 0; i < PRIORITY_REGISTERS; i++)
   {
-    ((u32*)(AT91C_BASE_NVIC->NVIC_IPR))[i] = au32PriorityConfig[i];
+    pu32PrioRegs[i] = au32PriorityConfig[i];
   }
-      
+
 } /* end InterruptSetup(void) */
 
-  
+
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn ISR void SysTick_Handler(void)
 
-@brief Updates the global ms timer.  
+@brief Updates the global ms timer.
 
-This interrupt is always enabled and running in 
+This interrupt is always enabled and running in
 the system and is essential for system timing and sleep wakeup.
 This ISR should be as fast as possible!
 
@@ -113,23 +118,23 @@ void SysTick_Handler(void)
 {
   /* Clear the sleep flag */
   G_u32SystemFlags &= ~_SYSTEM_SLEEPING;
-  
+
   /* Update Timers */
   G_u32SystemTime1ms++;
   if( (G_u32SystemTime1ms % 1000) == 0)
   {
     G_u32SystemTime1s++;
   }
-    
+
 } /* end SysTickHandler(void) */
 
 
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn ISR void PIOA_IrqHandler(void)
 
-@brief Parses the PORTA GPIO interrupts and handles them appropriately.  
+@brief Parses the PORTA GPIO interrupts and handles them appropriately.
 
-Note that all PORTA GPIO interrupts are ORed and will trigger this handler, 
+Note that all PORTA GPIO interrupts are ORed and will trigger this handler,
 therefore any expected interrupt that is enabled must be parsed out and handled.
 
 Requires:
@@ -147,14 +152,14 @@ void PIOA_IrqHandler(void)
   u32 u32CurrentButtonLocation;
 
   /* Grab a snapshot of the current PORTA status flags (clears all flags) */
-  u32GPIOInterruptSources = AT91C_BASE_PIOA->PIO_ISR;
+  u32GPIOInterruptSources = PIOA->PIO_ISR;
 
   /******** DO NOT set a breakpoint before this line of the ISR because the debugger
   will "read" PIO_ISR and clear the flags. ********/
-  
+
   /* Examine button interrupts */
   u32ButtonInterrupts = u32GPIOInterruptSources & GPIOA_BUTTONS;
-  
+
   /* Check if any port A buttons interrupted */
   if(u32ButtonInterrupts)
   {
@@ -167,25 +172,25 @@ void PIOA_IrqHandler(void)
       {
         ButtonStartDebounce(u32CurrentButtonLocation, PORTA);
       }
-      
+
       /* Shift the mask to look at the next bit */
       u32CurrentButtonLocation <<= 1;
     }
-        
+
   } /* end port A button interrupt checking */
-  
+
   /* Clear the PIOA pending flag and exit */
-  NVIC_ClearPendingIRQ(IRQn_PIOA);
-  
+  NVIC_ClearPendingIRQ(PIOA_IRQn);
+
 } /* end PIOA_IrqHandler() */
 
 
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn ISR void PIOB_IrqHandler(void)
 
-@brief Parses the PORTB GPIO interrupts and handles them appropriately.  
+@brief Parses the PORTB GPIO interrupts and handles them appropriately.
 
-Note that all PORTB GPIO interrupts are ORed and will trigger this handler, 
+Note that all PORTB GPIO interrupts are ORed and will trigger this handler,
 so any expected interrupt that is enabled must be parsed out and handled.
 
 Requires:
@@ -203,14 +208,14 @@ void PIOB_IrqHandler(void)
   u32 u32CurrentButtonLocation;
 
   /* Grab a snapshot of the current PORTB status flags (clears all flags) */
-  u32GPIOInterruptSources = AT91C_BASE_PIOB->PIO_ISR;
+  u32GPIOInterruptSources = PIOB->PIO_ISR;
 
   /******** DO NOT set a breakpoint before this line of the ISR because the debugger
   will "read" PIO_ISR and clear the flags. ********/
-  
+
   /* Examine button interrupts */
   u32ButtonInterrupts = u32GPIOInterruptSources & GPIOB_BUTTONS;
-  
+
   /* Check if any port B buttons interrupted */
   if(u32ButtonInterrupts)
   {
@@ -223,27 +228,27 @@ void PIOB_IrqHandler(void)
       {
         ButtonStartDebounce(u32CurrentButtonLocation, PORTB);
       }
-      
+
       /* Shift the mask to look at the next bit */
       u32CurrentButtonLocation <<= 1;
     }
-        
+
   } /* end port B button interrupt checking */
-  
+
   /* Clear the PIOB pending flag and exit */
-  NVIC_ClearPendingIRQ(IRQn_PIOB);
-  
+  NVIC_ClearPendingIRQ(PIOB_IRQn);
+
 } /* end PIOB_IrqHandler() */
 
 
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn ISR void HardFault_Handler(void)
- 
-@brief A non-maskable (always available) core interrupt that occurs when 
-something extraordinary occurs.  
 
-In many cases, this is referencing an invalid address, but can be other 
-events of various levels of mystery.  
+@brief A non-maskable (always available) core interrupt that occurs when
+something extraordinary occurs.
+
+In many cases, this is referencing an invalid address, but can be other
+events of various levels of mystery.
 
 Requires:
 - NONE
@@ -267,7 +272,7 @@ void HardFault_Handler(void)
 #endif
 
 #ifdef EIE_DOTMATRIX
-#ifdef EIE_DOTMATRIX_R01  
+#ifdef EIE_DOTMATRIX_R01
   LedOff(BLUE);
   LedOff(GREEN);
   LedOff(YELLOW);
@@ -284,13 +289,13 @@ void HardFault_Handler(void)
   LedOff(RED1);
   LedOff(RED2);
   LedOff(RED3);
-  
+
   LedOn(RED0);
 #endif /* EIE_DOTMATRIX_R01 */
 #endif /* EIE_DOTMATRIX */
-  
+
   while(1);  /* !!!!! update to log and/or report error and/or restart */
-  
+
 } /* end HardFault_Handler() */
 
 

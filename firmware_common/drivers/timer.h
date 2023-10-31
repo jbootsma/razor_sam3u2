@@ -1,5 +1,5 @@
 /*!**********************************************************************************************************************
-@file timer.h                                                                
+@file timer.h
 @brief Header file for timer.c
 
 **********************************************************************************************************************/
@@ -10,11 +10,11 @@
 /**********************************************************************************************************************
 Type Definitions
 **********************************************************************************************************************/
-/*! 
+/*!
 @enum TimerChannelType
-@brief Controlled list of available timer channels used in the member functions. 
+@brief Controlled list of available timer channels used in the member functions.
 */
-typedef enum {TIMER0_CHANNEL0 = 0, TIMER0_CHANNEL1 = 0x40, TIMER0_CHANNEL2 = 0x80} TimerChannelType;
+typedef enum {TIMER0_CHANNEL0 = 0, TIMER0_CHANNEL1 = 1, TIMER0_CHANNEL2 = 2} TimerChannelType;
 
 
 
@@ -23,7 +23,7 @@ Function Declarations
 **********************************************************************************************************************/
 
 /*------------------------------------------------------------------------------------------------------------------*/
-/*! @publicsection */                                                                                            
+/*! @publicsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 void TimerSet(TimerChannelType eTimerChannel_, u16 u16TimerValue_);
 void TimerStart(TimerChannelType eTimerChannel_);
@@ -33,14 +33,14 @@ void TimerAssignCallback(TimerChannelType eTimerChannel_, fnCode_type fpUserCall
 
 
 /*------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */                                                                                            
+/*! @protectedsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 void TimerInitialize(void);
 void TimerRunActiveState(void);
 
 
 /*------------------------------------------------------------------------------------------------------------------*/
-/*! @privatesection */                                                                                            
+/*! @privatesection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 static void TimerDefaultCallback(void);
 
@@ -48,8 +48,8 @@ static void TimerDefaultCallback(void);
 /***********************************************************************************************************************
 State Machine Declarations
 ***********************************************************************************************************************/
-static void TimerSM_Idle(void);    
-static void TimerSM_Error(void);         
+static void TimerSM_Idle(void);
+static void TimerSM_Error(void);
 
 
 /**********************************************************************************************************************
@@ -67,9 +67,9 @@ TIMER_CLOCK4 = MCK/128 (2.67us / tick)
 TIMER_CLOCK5(1) SLCK
 
 PA0 is an open pin available for TIOB0
-PA26 is an open pin availble as external clock input TCLK2 if set for Peripheral B function 
-PB5 is an open pin available for TIOA1 I/O function if set for Peripheral A 
-PB6 is an open pin available for TIOB1 I/O function if set for Peripheral A 
+PA26 is an open pin availble as external clock input TCLK2 if set for Peripheral B function
+PB5 is an open pin available for TIOA1 I/O function if set for Peripheral A
+PB6 is an open pin available for TIOB1 I/O function if set for Peripheral A
 
 */
 
@@ -85,7 +85,7 @@ PB6 is an open pin available for TIOB1 I/O function if set for Peripheral A
     03 [0] Reserved
     02 [0] SWTRG no software trigger
     01 [1] CLKDIS Clock disabled to start
-    00 [0] CLKEN Clock not enabled 
+    00 [0] CLKEN Clock not enabled
 */
 
 #define TC1_CMR_INIT (u32)0x000CC403
@@ -133,7 +133,7 @@ PB6 is an open pin available for TIOB1 I/O function if set for Peripheral A
 
 #define TC1_IER_INIT (u32)0x00000010
 /*
-    31-08 [0] Reserved 
+    31-08 [0] Reserved
 
     07 [0] ETRGS RC Load interrupt not enabled
     06 [0] LDRBS RB Load interrupt not enabled
@@ -142,13 +142,13 @@ PB6 is an open pin available for TIOB1 I/O function if set for Peripheral A
 
     03 [0] CPBS RB compare interrupt not enabled
     02 [0] CPAS RA Compare Interrupt enabled
-    01 [0] LOVRS Lover's bit? Load Overrun interrupt not enabled 
+    01 [0] LOVRS Lover's bit? Load Overrun interrupt not enabled
     00 [0] COVFS Counter Overflow interrupt not enabled
 */
 
 #define TC1_IDR_INIT (u32)0x000000EF
 /*
-    31-08 [0] Reserved 
+    31-08 [0] Reserved
 
     07 [1] ETRGS RC Load interrupt disabled
     06 [1] LDRBS RB Load interrupt disabled
@@ -157,7 +157,7 @@ PB6 is an open pin available for TIOB1 I/O function if set for Peripheral A
 
     03 [1] CPBS RB compare interrupt disabled
     02 [1] CPAS RA Compare Interrupt not disabled
-    01 [1] LOVRS Lover's bit?!? Load Overrun interrupt disabled 
+    01 [1] LOVRS Lover's bit?!? Load Overrun interrupt disabled
     00 [1] COVFS Counter Overflow interrupt disabled
 */
 

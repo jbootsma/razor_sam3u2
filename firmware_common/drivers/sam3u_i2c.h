@@ -1,5 +1,5 @@
 /*!**********************************************************************************************************************
-@file sam3u_i2c.h                                                                
+@file sam3u_i2c.h
 @brief Header file for sam3u_TWI.c
 **********************************************************************************************************************/
 
@@ -12,27 +12,27 @@
 Type Definitions
 **********************************************************************************************************************/
 
-/*! 
+/*!
 @enum TwiStopType
-@brief Type of behaviour for STOP condition after message. 
+@brief Type of behaviour for STOP condition after message.
 */
 typedef enum {TWI_STOP, TWI_NO_STOP, TWI_NA} TwiStopType;
 
 
-/*! 
+/*!
 @enum TwiDirectionType
-@brief Controlled list to specify data transfer bit order. 
+@brief Controlled list to specify data transfer bit order.
 */
 typedef enum {TWI_EMPTY, TWI_WRITE, TWI_READ} TwiDirectionType;
 
 
-/*! 
+/*!
 @struct TwiPeripheralType
-@brief User-defined TWI configuration information 
+@brief User-defined TWI configuration information
 */
-typedef struct 
+typedef struct
 {
-  AT91PS_TWI pBaseAddress;             /*!< @brief Base address of the associated peripheral */
+  Twi* pBaseAddress;                   /*!< @brief Base address of the associated peripheral */
   MessageType* pTransmitBuffer;        /*!< @brief Pointer to the transmit message struct linked list */
   u32 u32PrivateFlags;                 /*!< @brief Private peripheral flags */
 } TwiPeripheralType;
@@ -41,14 +41,14 @@ typedef struct
 #define _TWI_TRANSMITTING              (u32)0x00000001   /* Peripheral is Transmitting */
 #define _TWI_RECEIVING                 (u32)0x00000002   /* Peripheral is Receiving */
 #define _TWI_TRANS_NOT_COMP            (u32)0x00000004   /* Tx Transmit hasn't been completed */
- 
+
 #define _TWI_ERROR_TX_MSG_SYNC         (u32)0x01000000  /*!< @brief Local Tx message token != queued token */
 /* end u32PrivateFlags */
 
 
-/*! 
+/*!
 @struct TwiMessageQueueType
-@brief Message-specific information 
+@brief Message-specific information
 */
 typedef struct
 {
@@ -57,8 +57,8 @@ typedef struct
   u8* pu8RxBuffer;                     /*!< @brief RX ONLY: Pointer to receive buffer in user application */
   u8 u8Address;                        /*!< @brief Slave address */
   TwiDirectionType eDirection;         /*!< @brief Tx/Rx Message Type */
-  TwiStopType eStopType;               /*!< @brief TX ONLY: STOP condition behaviour */               
-  u8 u8Pad;                       
+  TwiStopType eStopType;               /*!< @brief TX ONLY: STOP condition behaviour */
+  u8 u8Pad;
 } TwiMessageQueueType;
 
 
@@ -80,9 +80,6 @@ Constants / Definitions
 #define U8_NEXT_TRANSFER_DELAY_MS      (u8)1               /*!< @brief Time before next transfer will begin */
 #define U32_RX_TIMEOUT_MS              (u32)3000           /*!< @brief Max time allowed for Rx message */
 
-
-/*! @cond DOXYGEN_EXCLUDE */
-#define TWI_MMR_ADDRESS_SHIFT          (u8)0x10            /* Used with << to shift address to correct position in MMR */
 
 /*! @endcond */
 
@@ -113,14 +110,14 @@ Constants / Definitions
 **********************************************************************************************************************/
 
 /*-------------------------------------------------------------------------------------------------------------------*/
-/*! @publicsection */                                                                                            
+/*! @publicsection */
 /*-------------------------------------------------------------------------------------------------------------------*/
 bool TwiReadData(u8 u8SlaveAddress_, u8* pu8RxBuffer_, u32 u32Size_);
 u32 TwiWriteData(u8 u8SlaveAddress_, u32 u32Size_, u8* pu8Data_, TwiStopType eStop_);
 
 
 /*-------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */                                                                                            
+/*! @protectedsection */
 /*-------------------------------------------------------------------------------------------------------------------*/
 void TwiInitialize(void);
 void TwiRunActiveState(void);
@@ -130,7 +127,7 @@ void TWI0_IrqHandler(void);
 
 
 /*-------------------------------------------------------------------------------------------------------------------*/
-/*! @privatesection */                                                                                            
+/*! @privatesection */
 /*-------------------------------------------------------------------------------------------------------------------*/
 
 
@@ -146,9 +143,9 @@ static void TwiSM_PdcReceive(void);
 static void TwiSM_ReceiveLastByte(void);
 static void TwiSM_ReceiveComplete(void);
 
-static void TwiSM_NextTransferDelay(void);       
+static void TwiSM_NextTransferDelay(void);
 
-static void TwiSM_Error(void);         
+static void TwiSM_Error(void);
 
 
 
