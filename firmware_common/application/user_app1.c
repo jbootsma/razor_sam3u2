@@ -140,30 +140,62 @@ State Machine Function Definitions
 /*-------------------------------------------------------------------------------------------------------------------*/
 /* What does this state do? */
 static void UserApp1SM_Idle(void) {
+  static const u16 aNoteFreqs[] = {
+    C3, C3S, D3, D3S, E3, F3, F3S, G3, G3S, A3, A3S, B3,
+    C4, C4S, D4, D4S, E4, F4, F4S, G4, G4S, A4, A4S, B4,
+    C5, C5S, D5, D5S, E5, F5, F5S, G5, G5S, A5, A5S, B5,
+    C6, C6S, D6, D6S, E6, F6, F6S, G6, G6S, A6, A6S, B6,
+  };
+  static const char acKeys[12] = "zsxdcvgbhnjm";
+
+  static u8 u8BaseIdx = 0;
+  static u16 u16NoteTimer = 0;
+
+  static char acScanBuf[DEBUG_SCANF_BUFFER_SIZE];
+  u8 charCount = DebugScanf((u8*)acScanBuf);
+
+  if (charCount > 0) {
+    for (u8 idx = 0; idx < charCount; idx++) {
+      // Loop is kinda pricy, but should only be processing a char or two per tick at most.
+      for (u8 key_idx = 0; key_idx < 12; key_idx++) {
+        if (acKeys[key_idx] == acScanBuf[idx]) {
+          u16 u16Freq = aNoteFreqs[u8BaseIdx + key_idx];
+          DebugPrintf("Start note with freq ");
+          DebugPrintNumber(u16Freq);
+          DebugLineFeed();
+          PWMAudioSetFrequency(BUZZER1, u16Freq);
+          PWMAudioOn(BUZZER1);
+          u16NoteTimer = 500;
+          break;
+        }
+      }
+    }
+  }
+
   if (WasButtonPressed(BUTTON0)) {
     ButtonAcknowledge(BUTTON0);
-    PWMAudioSetFrequency(BUZZER1, 262);
+    u8BaseIdx = 0;
   }
 
   if (WasButtonPressed(BUTTON1)) {
     ButtonAcknowledge(BUTTON1);
-    PWMAudioSetFrequency(BUZZER1, 294);
+    u8BaseIdx = 12;
   }
 
   if (WasButtonPressed(BUTTON2)) {
     ButtonAcknowledge(BUTTON2);
-    PWMAudioSetFrequency(BUZZER1, 330);
+    u8BaseIdx = 24;
   }
 
   if (WasButtonPressed(BUTTON3)) {
     ButtonAcknowledge(BUTTON3);
-    PWMAudioSetFrequency(BUZZER1, 392);
+    u8BaseIdx = 36;
   }
 
-  if (IsButtonPressed(BUTTON0) || IsButtonPressed(BUTTON1) || IsButtonPressed(BUTTON2) || IsButtonPressed(BUTTON3)) {
-    PWMAudioOn(BUZZER1);
-  } else {
-    PWMAudioOff(BUZZER1);
+  if (u16NoteTimer > 0) {
+    if (--u16NoteTimer == 0) {
+      PWMAudioOff(BUZZER1);
+    }
   }
 } /* end UserApp1SM_Idle() */
 
