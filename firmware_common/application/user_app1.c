@@ -61,14 +61,23 @@ extern volatile u32 G_u32SystemTime1s;     /*!< @brief From main.c */
 extern volatile u32 G_u32SystemFlags;      /*!< @brief From main.c */
 extern volatile u32 G_u32ApplicationFlags; /*!< @brief From main.c */
 
+/* Local variables */
+#define MAX_PASSWD_LEN 10
+static ButtonNameType aPasswd[MAX_PASSWD_LEN] = {0, 2, 2, 1, 2, 0};
+static u8 u8PasswdLen = 6;
+
+static ButtonNameType aEntry[MAX_PASSWD_LEN];
+static u8 u8EntryLen = 0;
+
 /***********************************************************************************************************************
-Global variable definitions with scope limited to this local application.
-Variable names shall start with "UserApp1_<type>" and be declared as static.
+State Machine Declarations
 ***********************************************************************************************************************/
-static fnCode_type
-    UserApp1_pfStateMachine; /*!< @brief The state machine function pointer */
-// static u32 UserApp1_u32Timeout;                           /*!< @brief Timeout
-// counter used across states */
+static StateMachineType sUserApp1Sm;
+
+static void StartupState(StateMachineEventType eEvt);
+static void LockedState(StateMachineEventType eEvt);
+static void PasswdSetState(StateMachineEventType eEvt);
+static void PasswdCheckState(StateMachineEventType eEvt);
 
 /**********************************************************************************************************************
 Function Definitions
@@ -102,14 +111,7 @@ void UserApp1Initialize(void) {
     LedOff(eLed);
   }
 
-  /* If good initialization, set state to Idle */
-  if (1) {
-    UserApp1_pfStateMachine = UserApp1SM_Idle;
-  } else {
-    /* The task isn't properly initialized, so shut it down and don't run */
-    UserApp1_pfStateMachine = UserApp1SM_Error;
-  }
-
+  InitStateMachine(&sUserApp1Sm, StartupState);
 } /* end UserApp1Initialize() */
 
 /*!----------------------------------------------------------------------------------------------------------------------
@@ -128,7 +130,12 @@ Promises:
 
 */
 void UserApp1RunActiveState(void) {
-  UserApp1_pfStateMachine();
+  // "secret" combo to reset password. Works always.
+  if (IsButtonHeld(BUTTON0, 3000) && IsButtonHeld(BUTTON3, 3000)) {
+    ChangeState(&sUserApp1Sm, PasswdSetState);
+  }
+
+  RunStateMachine(&sUserApp1Sm);
 
 } /* end UserApp1RunActiveState */
 
@@ -136,74 +143,163 @@ void UserApp1RunActiveState(void) {
 /*! @privatesection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
+static void AckAllButtons(void) {
+  ButtonAcknowledge(BUTTON0);
+  ButtonAcknowledge(BUTTON1);
+  ButtonAcknowledge(BUTTON2);
+  ButtonAcknowledge(BUTTON3);
+}
+
 /**********************************************************************************************************************
 State Machine Function Definitions
 **********************************************************************************************************************/
-/*-------------------------------------------------------------------------------------------------------------------*/
-/* What does this state do? */
-static void UserApp1SM_Idle(void) {
-  static bool bIsBlinking = FALSE;
 
-  static const LedRateType aBlinkRates[] = {
-      LED_1HZ,
-      LED_2HZ,
-      LED_4HZ,
-      LED_8HZ,
-  };
-  static const u8 u8NumBlinkRates =
-      sizeof(aBlinkRates) / sizeof(aBlinkRates[0]);
-  static u8 u8BlinkRateIdx = 0;
+void StartupState(StateMachineEventType eEvt) {
+  switch (eEvt) {
+  case SM_EVT_ENTER:
+    LedPWM(YELLOW, LED_PWM_20);
+    SetTimeout(&sUserApp1Sm, 3000);
 
-  if (IsButtonPressed(BUTTON0)) {
-    LedOn(WHITE);
-  } else {
-    LedOff(WHITE);
-  }
+    AckAllButtons();
+    break;
 
-  if (IsButtonPressed(BUTTON1)) {
-    LedOn(PURPLE);
-  } else {
-    LedOff(PURPLE);
-  }
-
-  if (IsButtonPressed(BUTTON2)) {
-    LedOn(BLUE);
-  } else {
-    LedOff(BLUE);
-  }
-
-  if (WasButtonPressed(BUTTON1)) {
-    ButtonAcknowledge(BUTTON1);
-    bIsBlinking = !bIsBlinking;
-
-    if (bIsBlinking) {
-      LedBlink(YELLOW, aBlinkRates[u8BlinkRateIdx]);
-    } else {
-      LedOff(YELLOW);
+  case SM_EVT_TICK:
+    if (WasButtonPressed(BUTTON3)) {
+      ButtonAcknowledge(BUTTON3);
+      ChangeState(&sUserApp1Sm, PasswdSetState);
     }
+    break;
+
+  case SM_EVT_TIMEOUT:
+    ChangeState(&sUserApp1Sm, LockedState);
+    break;
+
+  case SM_EVT_EXIT:
+    LedOff(YELLOW);
+    break;
+
+  default:
+    break;
   }
+}
 
-  if (WasButtonPressed(BUTTON2)) {
-    ButtonAcknowledge(BUTTON2);
+void PasswdSetState(StateMachineEventType eEvt) {
+  switch (eEvt) {
+  case SM_EVT_ENTER:
+    LedBlink(RED, LED_4HZ);
+    LedBlink(GREEN, LED_4HZ);
+    AckAllButtons();
+    u8PasswdLen = 0;
+    break;
 
-    if (bIsBlinking) {
-      if (++u8BlinkRateIdx == u8NumBlinkRates) {
-        u8BlinkRateIdx = 0;
+  case SM_EVT_EXIT:
+    LedOff(RED);
+    LedOff(GREEN);
+    break;
+
+  case SM_EVT_TICK:
+    if (u8PasswdLen < MAX_PASSWD_LEN) {
+      if (WasButtonPressed(BUTTON0)) {
+        ButtonAcknowledge(BUTTON0);
+        aPasswd[u8PasswdLen++] = BUTTON0;
+      } else if (WasButtonPressed(BUTTON1)) {
+        ButtonAcknowledge(BUTTON1);
+        aPasswd[u8PasswdLen++] = BUTTON1;
+      } else if (WasButtonPressed(BUTTON2)) {
+        ButtonAcknowledge(BUTTON2);
+        aPasswd[u8PasswdLen++] = BUTTON2;
       }
-      LedBlink(YELLOW, aBlinkRates[u8BlinkRateIdx]);
     }
-  }
 
-  if (IsButtonHeld(BUTTON2, 2000)) {
-    LedOn(CYAN);
-  } else {
-    LedOff(CYAN);
-  }
-} /* end UserApp1SM_Idle() */
+    if (WasButtonPressed(BUTTON3)) {
+      ButtonAcknowledge(BUTTON3);
+      ChangeState(&sUserApp1Sm, LockedState);
+    }
+    break;
 
-/*-------------------------------------------------------------------------------------------------------------------*/
-/* Handle an error */
-static void UserApp1SM_Error(void) {} /* end UserApp1SM_Error() */
+  case SM_EVT_TIMEOUT:
+    break;
+  }
+}
+
+void LockedState(StateMachineEventType eEvt) {
+  switch (eEvt) {
+  case SM_EVT_ENTER:
+    LedPWM(RED, LED_PWM_10);
+    AckAllButtons();
+    u8EntryLen = 0;
+    break;
+
+  case SM_EVT_EXIT:
+    LedOff(RED);
+    break;
+
+  case SM_EVT_TICK:
+    if (u8EntryLen < MAX_PASSWD_LEN) {
+      if (WasButtonPressed(BUTTON0)) {
+        ButtonAcknowledge(BUTTON0);
+        aEntry[u8EntryLen++] = BUTTON0;
+      } else if (WasButtonPressed(BUTTON1)) {
+        ButtonAcknowledge(BUTTON1);
+        aEntry[u8EntryLen++] = BUTTON1;
+      } else if (WasButtonPressed(BUTTON2)) {
+        ButtonAcknowledge(BUTTON2);
+        aEntry[u8EntryLen++] = BUTTON2;
+      }
+    }
+
+    if (WasButtonPressed(BUTTON3)) {
+      ButtonAcknowledge(BUTTON3);
+      ChangeState(&sUserApp1Sm, PasswdCheckState);
+    }
+    break;
+
+  case SM_EVT_TIMEOUT:
+    break;
+  }
+}
+
+void PasswdCheckState(StateMachineEventType eEvt) {
+  switch (eEvt) {
+  case SM_EVT_ENTER:
+    bool bMatched = TRUE;
+    if (u8EntryLen != u8PasswdLen) {
+      bMatched = FALSE;
+    } else {
+      for (u8 idx = 0; idx < u8PasswdLen; idx++) {
+        if (aEntry[idx] != aPasswd[idx]) {
+          bMatched = FALSE;
+          break;
+        }
+      }
+    }
+
+    if (bMatched) {
+      LedBlink(GREEN, LED_1HZ);
+    } else {
+      LedBlink(RED, LED_8HZ);
+    }
+
+    AckAllButtons();
+
+    break;
+
+  case SM_EVT_EXIT:
+    LedOff(RED);
+    LedOff(GREEN);
+    break;
+
+  case SM_EVT_TICK:
+    if (WasButtonPressed(BUTTON0) || WasButtonPressed(BUTTON1) ||
+        WasButtonPressed(BUTTON2) || WasButtonPressed(BUTTON3)) {
+      ChangeState(&sUserApp1Sm, LockedState);
+    }
+    break;
+
+  case SM_EVT_TIMEOUT:
+    break;
+  }
+}
 
 /*--------------------------------------------------------------------------------------------------------------------*/
 /* End of File */
