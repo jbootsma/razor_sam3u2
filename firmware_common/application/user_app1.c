@@ -70,7 +70,11 @@ static fnCode_type
 // static u32 UserApp1_u32Timeout;                           /*!< @brief Timeout
 // counter used across states */
 
-#define LED_STEP_TIME_MS 250
+#define LED_STEP_TIME_MS 40
+#define LCD_COLOR_STEPS_PER_BAND 30
+
+static LedRateType aCurrentRates[U8_TOTAL_LEDS];
+static LedRateType aTargetRates[U8_TOTAL_LEDS];
 
 /**********************************************************************************************************************
 Function Definitions
@@ -101,12 +105,10 @@ Promises:
 */
 void UserApp1Initialize(void) {
   for (LedNameType eLed = 0; eLed < U8_TOTAL_LEDS; eLed++) {
-    LedOff(eLed);
+    LedPWM(eLed, LED_0HZ);
+    aCurrentRates[eLed] = LED_PWM_0;
+    aTargetRates[eLed] = LED_PWM_0;
   }
-
-  LedOn(LCD_RED);
-  LedOn(LCD_GREEN);
-  LedOn(LCD_BLUE);
 
   /* If good initialization, set state to Idle */
   if (1) {
@@ -148,71 +150,113 @@ State Machine Function Definitions
 /*-------------------------------------------------------------------------------------------------------------------*/
 /* What does this state do? */
 static void UserApp1SM_Idle(void) {
+  static const LedNameType aLedFadeSteps[][2] = {
+      // in-to-out
+      {CYAN, GREEN},
+      {BLUE, YELLOW},
+      {PURPLE, ORANGE},
+      {WHITE, RED},
+      // left ping-pong
+      {PURPLE, RED},
+      {BLUE, RED},
+      {CYAN, RED},
+      {GREEN, RED},
+      {YELLOW, RED},
+      {ORANGE, RED},
+      {YELLOW, RED},
+      {GREEN, RED},
+      {CYAN, RED},
+      {BLUE, RED},
+      {PURPLE, RED},
+      {WHITE, RED},
+      // right ping-pong
+      {WHITE, ORANGE},
+      {WHITE, YELLOW},
+      {WHITE, GREEN},
+      {WHITE, CYAN},
+      {WHITE, BLUE},
+      {WHITE, PURPLE},
+      {WHITE, BLUE},
+      {WHITE, CYAN},
+      {WHITE, GREEN},
+      {WHITE, YELLOW},
+      {WHITE, ORANGE},
+      // out-to-in
+      {WHITE, RED},
+      {PURPLE, ORANGE},
+      {BLUE, YELLOW},
+  };
+  static const u8 u8NumFades = sizeof(aLedFadeSteps) / sizeof(aLedFadeSteps[0]);
+
+  static const LedRateType aLcdColors[][3] = {
+      {LED_PWM_100, LED_PWM_0, LED_PWM_0},    // R
+      {LED_PWM_100, LED_PWM_50, LED_PWM_0},   // O
+      {LED_PWM_100, LED_PWM_100, LED_PWM_0},  // Y
+      {LED_PWM_0, LED_PWM_100, LED_PWM_0},    // G
+      {LED_PWM_0, LED_PWM_0, LED_PWM_100},    // B
+      {LED_PWM_0, LED_PWM_50, LED_PWM_100},   // I
+      {LED_PWM_30, LED_PWM_0, LED_PWM_100},   // V
+  };
+  static const u8 u8NumColors = sizeof(aLcdColors) / sizeof(aLcdColors[0]);
+
   static u8 u8StepTimer = LED_STEP_TIME_MS;
-  static u8 u8LedCounter = 0;
-  static u8 u8LcdCounter = 6;
+  static u8 u8ColorTimer = LCD_COLOR_STEPS_PER_BAND;
+  static u8 u8FadeIdx = u8NumFades - 1;
+  static u8 u8ColorIdx = u8NumColors - 1;
 
   if (--u8StepTimer == 0) {
     u8StepTimer = LED_STEP_TIME_MS;
-
-    LedToggle(PURPLE);
-
-    if (++u8LedCounter == 16) {
-      u8LedCounter = 0;
-    }
-
-    static const LedNameType aCtrLeds[] = {RED, ORANGE, YELLOW, GREEN};
-
-    for (u8 i = 0; i < 4; i++) {
-      if (u8LedCounter & (1u << i)) {
-        LedOn(aCtrLeds[i]);
-      } else {
-        LedOff(aCtrLeds[i]);
+    bool bDoneFade = TRUE;
+    for (LedNameType eLed = WHITE; eLed <= RED; eLed++) {
+      if (aCurrentRates[eLed] < aTargetRates[eLed]) {
+        bDoneFade = FALSE;
+        aCurrentRates[eLed] += 1;
+        LedPWM(eLed, aCurrentRates[eLed]);
+      } else if (aCurrentRates[eLed] > aTargetRates[eLed]) {
+        bDoneFade = FALSE;
+        aCurrentRates[eLed] -= 1;
+        LedPWM(eLed, aCurrentRates[eLed]);
       }
     }
 
-    if (++u8LcdCounter == 7) {
-      u8LcdCounter = 0;
+    for (LedNameType eLed = LCD_RED; eLed <= LCD_BLUE; eLed++) {
+      if (aCurrentRates[eLed] < aTargetRates[eLed]) {
+        aCurrentRates[eLed] += 1;
+        LedPWM(eLed, aCurrentRates[eLed]);
+      } else if (aCurrentRates[eLed] > aTargetRates[eLed]) {
+        aCurrentRates[eLed] -= 1;
+        LedPWM(eLed, aCurrentRates[eLed]);
+      }
     }
 
-    switch (u8LcdCounter) {
-      case 0:
-        LedOn(LCD_RED);
-        LedOff(LCD_GREEN);
-        LedOff(LCD_BLUE);
-        break;
-      case 1:
-        LedOn(LCD_RED);
-        LedOn(LCD_GREEN);
-        LedOff(LCD_BLUE);
-        break;
-      case 2:
-        LedOff(LCD_RED);
-        LedOn(LCD_GREEN);
-        LedOff(LCD_BLUE);
-        break;
-      case 3:
-        LedOff(LCD_RED);
-        LedOn(LCD_GREEN);
-        LedOn(LCD_BLUE);
-        break;
-      case 4:
-        LedOff(LCD_RED);
-        LedOff(LCD_GREEN);
-        LedOn(LCD_BLUE);
-        break;
-      case 5:
-        LedOn(LCD_RED);
-        LedOff(LCD_GREEN);
-        LedOn(LCD_BLUE);
-        break;
-      case 6:
-        LedOn(LCD_RED);
-        LedOn(LCD_GREEN);
-        LedOn(LCD_BLUE);
-        break;
+    if (bDoneFade) {
+      if (++u8FadeIdx == u8NumFades) {
+        u8FadeIdx = 0;
+      }
+
+      for (LedNameType eLed = WHITE; eLed <= RED; eLed++) {
+        if (eLed == aLedFadeSteps[u8FadeIdx][0] ||
+            eLed == aLedFadeSteps[u8FadeIdx][1]) {
+          aTargetRates[eLed] = LED_PWM_35;
+        } else {
+          aTargetRates[eLed] = LED_PWM_0;
+        }
+      }
+    }
+
+    if (--u8ColorTimer == 0) {
+      u8ColorTimer = LCD_COLOR_STEPS_PER_BAND;
+
+      if (++u8ColorIdx == u8NumColors) {
+        u8ColorIdx = 0;
+      }
+
+      aTargetRates[LCD_RED] = aLcdColors[u8ColorIdx][0];
+      aTargetRates[LCD_GREEN] = aLcdColors[u8ColorIdx][1];
+      aTargetRates[LCD_BLUE] = aLcdColors[u8ColorIdx][2];
     }
   }
+
 } /* end UserApp1SM_Idle() */
 
 /*-------------------------------------------------------------------------------------------------------------------*/
