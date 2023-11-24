@@ -150,6 +150,8 @@ static void UserApp1SM_Idle(void) {
 
   static u8 u8BaseIdx = 0;
   static u16 u16NoteTimer = 0;
+  static u32 u32CurrFreq = 0;
+  static u32 u32TargetFreq = 0;
 
   static char acScanBuf[DEBUG_SCANF_BUFFER_SIZE];
   u8 charCount = DebugScanf((u8*)acScanBuf);
@@ -159,13 +161,19 @@ static void UserApp1SM_Idle(void) {
       // Loop is kinda pricy, but should only be processing a char or two per tick at most.
       for (u8 key_idx = 0; key_idx < 12; key_idx++) {
         if (acKeys[key_idx] == acScanBuf[idx]) {
-          u16 u16Freq = aNoteFreqs[u8BaseIdx + key_idx];
+          u32TargetFreq = aNoteFreqs[u8BaseIdx + key_idx];
+          u32TargetFreq *= 10;
+
           DebugPrintf("Start note with freq ");
-          DebugPrintNumber(u16Freq);
+          DebugPrintNumber(u32TargetFreq);
           DebugLineFeed();
-          PWMAudioSetFrequency(BUZZER1, u16Freq);
-          PWMAudioOn(BUZZER1);
+
           u16NoteTimer = 500;
+          if (u32CurrFreq == 0) {
+            u32CurrFreq = u32TargetFreq;
+            PWMAudioSetFrequency(BUZZER1, u32CurrFreq / 10);
+            PWMAudioOn(BUZZER1);
+          }
           break;
         }
       }
@@ -193,9 +201,29 @@ static void UserApp1SM_Idle(void) {
   }
 
   if (u16NoteTimer > 0) {
-    if (--u16NoteTimer == 0) {
+    if (u32CurrFreq < u32TargetFreq) {
+      u32CurrFreq = (u32CurrFreq * 1001) / 1000;
+      if (u32CurrFreq > u32TargetFreq) {
+        u32CurrFreq = u32TargetFreq;
+      }
+
+      PWMAudioSetFrequency(BUZZER1, u32CurrFreq / 10);
+    }
+    
+    else if (u32CurrFreq > u32TargetFreq) {
+      u32CurrFreq = (u32CurrFreq * 999) / 1000;
+      if (u32CurrFreq < u32TargetFreq) {
+        u32CurrFreq = u32TargetFreq;
+      }
+
+      PWMAudioSetFrequency(BUZZER1, u32CurrFreq/ 10);
+    }
+
+    else if (--u16NoteTimer == 0) {
+      u32CurrFreq = 0;
       PWMAudioOff(BUZZER1);
     }
+
   }
 } /* end UserApp1SM_Idle() */
 
