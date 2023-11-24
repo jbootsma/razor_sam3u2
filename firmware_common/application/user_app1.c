@@ -92,6 +92,8 @@ Promises:
 */
 void UserApp1Initialize(void)
 {
+  DebugSetPassthrough();
+
   /* If good initialization, set state to Idle */
   if( 1 )
   {
@@ -140,7 +142,42 @@ State Machine Function Definitions
 /* What does this state do? */
 static void UserApp1SM_Idle(void)
 {
-    
+    static u8 au8Inbuf[DEBUG_RX_BUFFER_SIZE];
+    static u8 u8NameCount = 0;
+
+    static const char sName[] = "james";
+    static u8 u8MatchIdx = 0;
+
+    if (WasButtonPressed(BUTTON3)) {
+      ButtonAcknowledge(BUTTON3);
+      u8NameCount *= 10;
+    }
+
+    u8 u8NewChars = DebugScanf(au8Inbuf);
+
+    for (u8 idx = 0; idx < u8NewChars; idx++) {
+      if (au8Inbuf[idx] == sName[u8MatchIdx]) {
+        u8MatchIdx += 1;
+      } else if (au8Inbuf[idx] == sName[0]) {
+        u8MatchIdx = 1;
+      } else{
+        u8MatchIdx = 0;
+      }
+
+      if (u8MatchIdx == sizeof(sName) - 1) {
+        u8NameCount += 1;
+
+        DebugLineFeed();
+        for (u8 i = 0; i < u8NameCount / 10; i++) {
+          DebugPrintf("*");
+        }
+        DebugPrintNumber(u8NameCount);
+        for (u8 i = 0; i < u8NameCount / 10; i++) {
+          DebugPrintf("*");
+        }
+        DebugLineFeed();
+      }
+    }
 } /* end UserApp1SM_Idle() */
      
 
