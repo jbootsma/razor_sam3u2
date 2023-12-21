@@ -1,0 +1,3 @@
+# Best to use CMSIS sources files as-is, to avoid issues merging later.
+---
+DisableFormat: true

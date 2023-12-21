@@ -1,5 +1,5 @@
 /*!*********************************************************************************************************************
-@file user_app3.c                                                                
+@file user_app3.c
 @brief User's tasks / applications are written here.  This description
 should be replaced by something specific to the task.
 
@@ -8,7 +8,8 @@ To start a new task using this user_app2 as a template:
  1. Copy both user_app2.c and user_app2.h to the Application directory
  2. Rename the files yournewtaskname.c and yournewtaskname.h
  3. Add yournewtaskname.c and yournewtaskname.h to the Application Include and Source groups in the IAR project
- 4. Use ctrl-h (make sure "Match Case" is checked) to find and replace all instances of "user_app2" with "yournewtaskname"
+ 4. Use ctrl-h (make sure "Match Case" is checked) to find and replace all instances of "user_app2" with
+"yournewtaskname"
  5. Use ctrl-h to find and replace all instances of "UserApp3" with "YourNewTaskName"
  6. Use ctrl-h to find and replace all instances of "USER_APP1" with "YOUR_NEW_TASK_NAME"
  7. Add a call to YourNewTaskNameInitialize() in the init section of main
@@ -44,35 +45,32 @@ Global variable definitions with scope across entire project.
 All Global variable names shall start with "G_<type>UserApp3"
 ***********************************************************************************************************************/
 /* New variables */
-volatile u32 G_u32UserApp3Flags;                          /*!< @brief Global state flags */
-
+volatile u32 G_u32UserApp3Flags; /*!< @brief Global state flags */
 
 /*--------------------------------------------------------------------------------------------------------------------*/
 /* Existing variables (defined in other files -- should all contain the "extern" keyword) */
-extern volatile u32 G_u32SystemTime1ms;                   /*!< @brief From main.c */
-extern volatile u32 G_u32SystemTime1s;                    /*!< @brief From main.c */
-extern volatile u32 G_u32SystemFlags;                     /*!< @brief From main.c */
-extern volatile u32 G_u32ApplicationFlags;                /*!< @brief From main.c */
-
+extern volatile u32 G_u32SystemTime1ms;    /*!< @brief From main.c */
+extern volatile u32 G_u32SystemTime1s;     /*!< @brief From main.c */
+extern volatile u32 G_u32SystemFlags;      /*!< @brief From main.c */
+extern volatile u32 G_u32ApplicationFlags; /*!< @brief From main.c */
 
 /***********************************************************************************************************************
 Global variable definitions with scope limited to this local application.
 Variable names shall start with "UserApp3_<type>" and be declared as static.
 ***********************************************************************************************************************/
-static fnCode_type UserApp3_pfStateMachine;               /*!< @brief The state machine function pointer */
-//static u32 UserApp3_u32Timeout;                           /*!< @brief Timeout counter used across states */
-
+static fnCode_type UserApp3_pfStateMachine; /*!< @brief The state machine function pointer */
+// static u32 UserApp3_u32Timeout;                           /*!< @brief Timeout counter used across states */
 
 /**********************************************************************************************************************
 Function Definitions
 **********************************************************************************************************************/
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/*! @publicsection */                                                                                            
+/*! @publicsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */                                                                                            
+/*! @protectedsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
 /*!--------------------------------------------------------------------------------------------------------------------
@@ -90,22 +88,17 @@ Promises:
 - NONE
 
 */
-void UserApp3Initialize(void)
-{
+void UserApp3Initialize(void) {
   /* If good initialization, set state to Idle */
-  if( 1 )
-  {
+  if (1) {
     UserApp3_pfStateMachine = UserApp3SM_Idle;
-  }
-  else
-  {
+  } else {
     /* The task isn't properly initialized, so shut it down and don't run */
     UserApp3_pfStateMachine = UserApp3SM_Error;
   }
 
 } /* end UserApp3Initialize() */
 
-  
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn void UserApp3RunActiveState(void)
 
@@ -121,37 +114,22 @@ Promises:
 - Calls the function to pointed by the state machine function pointer
 
 */
-void UserApp3RunActiveState(void)
-{
-  UserApp3_pfStateMachine();
-
-} /* end UserApp3RunActiveState */
-
+void UserApp3RunActiveState(void) { UserApp3_pfStateMachine(); } /* end UserApp3RunActiveState */
 
 /*------------------------------------------------------------------------------------------------------------------*/
-/*! @privatesection */                                                                                            
+/*! @privatesection */
 /*--------------------------------------------------------------------------------------------------------------------*/
-
 
 /**********************************************************************************************************************
 State Machine Function Definitions
 **********************************************************************************************************************/
 /*-------------------------------------------------------------------------------------------------------------------*/
 /* What does this state do? */
-static void UserApp3SM_Idle(void)
-{
-    
-} /* end UserApp3SM_Idle() */
-     
+static void UserApp3SM_Idle(void) {} /* end UserApp3SM_Idle() */
 
 /*-------------------------------------------------------------------------------------------------------------------*/
 /* Handle an error */
-static void UserApp3SM_Error(void)          
-{
-  
-} /* end UserApp3SM_Error() */
-
-
+static void UserApp3SM_Error(void) {} /* end UserApp3SM_Error() */
 
 /*--------------------------------------------------------------------------------------------------------------------*/
 /* End of File                                                                                                        */
