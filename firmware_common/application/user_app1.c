@@ -61,6 +61,8 @@ Variable names shall start with "UserApp1_<type>" and be declared as static.
 static fnCode_type UserApp1_pfStateMachine; /*!< @brief The state machine function pointer */
 // static u32 UserApp1_u32Timeout;                           /*!< @brief Timeout counter used across states */
 
+static volatile u16 UserApp1_u16LastSample;
+
 /**********************************************************************************************************************
 Function Definitions
 **********************************************************************************************************************/
@@ -72,6 +74,8 @@ Function Definitions
 /*--------------------------------------------------------------------------------------------------------------------*/
 /*! @protectedsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
+
+static void UpdateSample(u16 u16SampleVal) { UserApp1_u16LastSample = u16SampleVal; }
 
 /*!--------------------------------------------------------------------------------------------------------------------
 @fn void UserApp1Initialize(void)
@@ -89,6 +93,16 @@ Promises:
 
 */
 void UserApp1Initialize(void) {
+  Adc12AssignCallback(ADC12_POTENTIOMETER, UpdateSample);
+
+  LedPWM(LCD_BLUE, LED_PWM_100);
+  LedPWM(LCD_GREEN, LED_PWM_0);
+  LedOff(LCD_RED);
+
+  LcdClearChars(LINE1_START_ADDR, U8_LCD_MAX_MESSAGE_SIZE);
+  LcdClearChars(LINE2_START_ADDR, U8_LCD_MAX_MESSAGE_SIZE);
+  LcdCommand(LCD_DISPLAY_CMD | LCD_DISPLAY_ON);
+
   /* If good initialization, set state to Idle */
   if (1) {
     UserApp1_pfStateMachine = UserApp1SM_Idle;
@@ -125,7 +139,49 @@ State Machine Function Definitions
 **********************************************************************************************************************/
 /*-------------------------------------------------------------------------------------------------------------------*/
 /* What does this state do? */
-static void UserApp1SM_Idle(void) {} /* end UserApp1SM_Idle() */
+static void UserApp1SM_Idle(void) {
+  static bool first_tick = TRUE; // Give ADC12 time to startup.
+
+  static u8 u8Framecount = 100;
+  static u8 u8DisplayedPct = 255;
+
+  if (--u8Framecount == 0) {
+    u8Framecount = 100; // 10 Hz.
+
+    u32 sample = UserApp1_u16LastSample;
+    sample = (sample * 100 + 2048) / 4096; // Convert to %
+
+    if (sample != u8DisplayedPct) {
+      u8DisplayedPct = sample;
+      char line[4];
+
+      u8 tmp = u8DisplayedPct;
+      u8 idx = 0;
+
+      line[idx++] = '0' + tmp / 100;
+      tmp -= (tmp / 100) * 100;
+
+      line[idx++] = '0' + tmp / 10;
+      tmp -= (tmp / 10) * 10;
+
+      line[idx++] = '0' + tmp;
+      line[idx] = '\0';
+
+      LcdMessage(LINE1_START_ADDR, line);
+    }
+
+    sample = (sample + 2) / 5; // Convert to PWM level.
+
+    LedPWM(LCD_BLUE, LED_PWM_100 - sample);
+    LedPWM(LCD_GREEN, LED_PWM_0 + sample);
+  }
+
+  if (!first_tick) {
+    Adc12StartConversion(ADC12_POTENTIOMETER);
+  }
+
+  first_tick = FALSE;
+} /* end UserApp1SM_Idle() */
 
 /*-------------------------------------------------------------------------------------------------------------------*/
 /* Handle an error */
