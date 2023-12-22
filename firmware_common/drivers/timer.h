@@ -155,6 +155,91 @@ PB6 is an open pin available for TIOB1 I/O function if set for Peripheral A
     00 [1] COVFS Counter Overflow interrupt disabled
 */
 
+/* Timer Channel 2 Setup */
+
+#define TC2_CCR_INIT (u32)0x00000002
+/*
+    31-04 [0] Reserved
+
+    03 [0] Reserved
+    02 [0] SWTRG no software trigger
+    01 [1] CLKDIS Clock disabled to start
+    00 [0] CLKEN Clock not enabled
+*/
+
+#define TC2_CMR_INIT (u32)0x0009C403
+/*
+    31 [0] BSWTRG no software trigger effect on TIOB
+    30 [0] "
+    29 [0] BEEVT no external event effect on TIOB
+    28 [0] "
+
+    27 [0] BCPC no RC compare effect on TIOB
+    26 [0] "
+    25 [0] BCPB no RB compare effect on TIOB
+    24 [0] "
+
+    23 [0] ASWTRG no TIOA software trigger effect
+    22 [0] "
+    21 [0] AEEVT no TIOA effect on external compare
+    20 [0] "
+
+    19 [1] ACPC Clear TIOA on RC compare
+    18 [0] "
+    17 [0] ACPA Set TIOA on RA compare
+    16 [1] "
+
+    15 [1] WAVE Waveform Mode is enabled
+    14 [1] WAVSEL Up to RC mode
+    13 [0] "
+    12 [0] ENETRG external event has no effect
+
+    11 [0] EEVT external event assigned to XC0
+    10 [1] "
+    09 [0] EEVTEDG no external event trigger
+    08 [0] "
+
+    07 [0] CPCDIS clock is NOT disabled when reaches RC
+    06 [0] CPCSTOP clock is NOT stopped when reaches RC
+    05 [0] BURST not gated
+    04 [0] "
+
+    03 [0] CLKI Counter incremented on rising edge
+    02 [0] TCCLKS TIMER_CLOCK4 (MCK/128 = 2.67us / tick)
+    01 [1] "
+    00 [1] "
+*/
+
+#define TC2_IER_INIT (u32)0x00000000
+/*
+    31-08 [0] Reserved
+
+    07 [0] ETRGS RC Load interrupt not enabled
+    06 [0] LDRBS RB Load interrupt not enabled
+    05 [0] LDRAS RA Load interrupt not enabled
+    04 [0] CPCS RC compare interrupt not enabled
+
+    03 [0] CPBS RB compare interrupt not enabled
+    02 [0] CPAS RA Compare Interrupt enabled
+    01 [0] LOVRS Lover's bit? Load Overrun interrupt not enabled
+    00 [0] COVFS Counter Overflow interrupt not enabled
+*/
+
+#define TC2_IDR_INIT (u32)0x000000FF
+/*
+    31-08 [0] Reserved
+
+    07 [1] ETRGS RC Load interrupt disabled
+    06 [1] LDRBS RB Load interrupt disabled
+    05 [1] LDRAS RA Load interrupt disabled
+    04 [1] CPCS RC compare interrupt disabled
+
+    03 [1] CPBS RB compare interrupt disabled
+    02 [1] CPAS RA Compare Interrupt disabled
+    01 [1] LOVRS Lover's bit?!? Load Overrun interrupt disabled
+    00 [1] COVFS Counter Overflow interrupt disabled
+*/
+
 /* TC Block Mode Register */
 #define TCB_BMR_INIT (u32)0x00100800
 /*

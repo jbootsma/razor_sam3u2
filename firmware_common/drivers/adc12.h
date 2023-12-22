@@ -22,7 +22,8 @@ typedef enum {
   ADC12_CH4 = 4,
   ADC12_CH5 = 5,
   ADC12_CH6 = 6,
-  ADC12_CH7 = 7
+  ADC12_CH7 = 7,
+  _ADC12_CH_INVLD = 8,
 } Adc12ChannelType;
 
 /**********************************************************************************************************************
@@ -32,8 +33,17 @@ Function Declarations
 /*-------------------------------------------------------------------------------------------------------------------*/
 /*! @publicsection */
 /*-------------------------------------------------------------------------------------------------------------------*/
+bool Adc12IsIdle(void);
+
 bool Adc12StartConversion(Adc12ChannelType eAdcChannel_);
 void Adc12AssignCallback(Adc12ChannelType eAdcChannel_, fnCode_u16_type pfUserCallback_);
+
+bool Adc12StartContinuousSampling(Adc12ChannelType eAdcChannel_, u16 u16SampleRateHz_, u16 *pu16SampleBuf_,
+                                  u16 u16SampleBufLen_);
+void Adc12StopContinuousSampling(void);
+bool Adc12CheckOverrun(void);
+void Adc12ClearOverrun(void);
+u16 Adc12GetSamples(u16 *pu16Dest_, u16 u16NumSamples_);
 
 /*-------------------------------------------------------------------------------------------------------------------*/
 /*! @protectedsection */
@@ -47,6 +57,7 @@ void ADCC0_IrqHandler(void);
 /*! @privatesection */
 /*-------------------------------------------------------------------------------------------------------------------*/
 void Adc12DefaultCallback(u16 u16Result_);
+void Adc12ContinuousCallback(u16 u16Result_);
 
 /**********************************************************************************************************************
 State Machine Declarations
@@ -58,36 +69,36 @@ static void Adc12SM_Error(void);
 Constants / Definitions
 **********************************************************************************************************************/
 /*! @cond DOXYGEN_EXCLUDE */
-#define ADC12B_MR_INIT (u32)0x0F041700
+#define ADC12B_MR_INIT (u32)0x0F3B0106
 /*
     31 [0] Reserved
     30 [0] "
     29 [0] "
     28 [0] "
 
-    27 [1] SHTIM set for maximum time to allow for maximum source impedance
+    27 [1] SHTIM set for maximum time to allow for maximum source impedance.
     26 [1] "
     25 [1] "
     24 [1] "
 
-    23 [0] STARTUP set for maximum startup time at 1MHz ADC clock
+    23 [0] STARTUP set for maximum startup time at 12MHz ADC clock. (59 + 1)*8/12MHz = 40us.
     22 [0] "
-    21 [0] "
-    20 [0] "
+    21 [1] "
+    20 [1] "
 
-    19 [0] "
-    18 [1] "
-    17 [0] "
-    16 [0] "
+    19 [1] "
+    18 [0] "
+    17 [1] "
+    16 [1] "
 
-    15 [0] PRESCAL is 23 (gives 1MHz ADC clock)
+    15 [0] PRESCAL is 1 (gives (48/(1 + 1) * 2) = 12MHz ADC clock)
     14 [0] "
     13 [0] "
-    12 [1] "
+    12 [0] "
 
     11 [0] "
-    10 [1] "
-    09 [1] "
+    10 [0] "
+    09 [0] "
     08 [1] "
 
     07 [0] Reserved
@@ -95,9 +106,9 @@ Constants / Definitions
     05 [0] SLEEP Normal mode
     04 [0] LOWRES 12-bit resolution
 
-    03 [0] TRGSEL not applicable
-    02 [0] "
-    01 [0] "
+    03 [0] TRGSEL use TIOA2 (only for continuous sampling)
+    02 [1] "
+    01 [1] "
     00 [0] TRGEN Hardware triggers disabled
 */
 
@@ -159,19 +170,19 @@ Constants / Definitions
     00 [1] "
 */
 
-#define ADC12B_EMR_INIT (u32)0x00040001
+#define ADC12B_EMR_INIT (u32)0x003B0001
 /*
     31-24 [0] Reserved
 
     23 [0] OFF_MODE_STARTUP_TIME target 40us
-    22 [0] (4 + 1)*8/1MHz = 40us
-    21 [0] "
-    20 [0] "
+    22 [0] (59 + 1)*8/12MHz = 40us
+    21 [1] "
+    20 [1] "
 
-    19 [0] "
-    18 [1] "
-    17 [0] "
-    16 [0] "
+    19 [1] "
+    18 [0] "
+    17 [1] "
+    16 [1] "
 
     15-4 [0] Reserved
 

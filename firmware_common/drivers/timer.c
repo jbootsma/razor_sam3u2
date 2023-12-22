@@ -201,14 +201,14 @@ Requires:
 - NONE
 
 Promises:
-- Timer 1 is configured per timer.h INIT settings
+- Timer 1 and 2 are configured per timer.h INIT settings
 
 */
 void TimerInitialize(void) {
   /* Load the block configuration registers */
   AT91C_BASE_TCB0->TCB_BMR = TCB_BMR_INIT;
 
-  /* Channel 0 and 2 settings not configured at this time */
+  /* Channel 0 settings not configured at this time */
 
   /* Load Channel 1 settings and set the default callback */
   AT91C_BASE_TC1->TC_CMR = TC1_CMR_INIT;
@@ -218,6 +218,15 @@ void TimerInitialize(void) {
   AT91C_BASE_TC1->TC_CCR = TC1_CCR_INIT;
 
   Timer_fpTimer1Callback = TimerDefaultCallback;
+
+  /*
+  Load Channel 2 settings. No initial RC/RA as they will be dependent on the
+  chosen sample rate.
+  */
+  AT91C_BASE_TC2->TC_CMR = TC2_CMR_INIT;
+  AT91C_BASE_TC2->TC_IER = TC2_IER_INIT;
+  AT91C_BASE_TC2->TC_IDR = TC2_IDR_INIT;
+  AT91C_BASE_TC2->TC_CCR = TC2_CCR_INIT;
 
   /* If good initialization, set state to Idle */
   if (1) {
