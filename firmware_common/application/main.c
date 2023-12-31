@@ -12,10 +12,14 @@ Global variable definitions with scope across entire project.
 All Global variable names shall start with "G_"
 ***********************************************************************************************************************/
 /* New variables */
-volatile u32 G_u32SystemTime1ms = 0;     /*!< @brief Global system time incremented every ms, max 2^32 (~49 days) */
-volatile u32 G_u32SystemTime1s  = 0;     /*!< @brief Global system time incremented every second, max 2^32 (~136 years) */
-volatile u32 G_u32SystemFlags   = 0;     /*!< @brief Global system flags */
-volatile u32 G_u32ApplicationFlags = 0;  /*!< @brief Global system application flags: set when application is successfully initialized */
+volatile u32 G_u32SystemTime1ms = 0; /*!< @brief Global system time incremented
+                                        every ms, max 2^32 (~49 days) */
+volatile u32 G_u32SystemTime1s = 0;  /*!< @brief Global system time incremented
+                                        every second, max 2^32 (~136 years) */
+volatile u32 G_u32SystemFlags = 0;   /*!< @brief Global system flags */
+volatile u32 G_u32ApplicationFlags =
+    0; /*!< @brief Global system application flags: set when application is
+          successfully initialized */
 volatile s32 G_s32SysTickSyncAdj =
     0; /*!< @brief Global adjustment to the length of the next 1ms systick
           period. Set by SysTickSyncEvt() in order to achieve event
@@ -67,6 +71,7 @@ int main(void) {
   /* Driver initialization */
   MessagingInitialize();
   UartInitialize();
+  UsbInitialize();
   DebugInitialize();
 
   /* Debug messages through DebugPrintf() are available from here */
@@ -106,6 +111,7 @@ int main(void) {
     /* Drivers */
     MessagingRunActiveState();
     UartRunActiveState();
+    UsbRunActiveState();
     DebugRunActiveState();
 
     ButtonRunActiveState();
@@ -119,6 +125,7 @@ int main(void) {
     LedRunActiveState();
     AntRunActiveState();
     AntApiRunActiveState();
+    UsbRunActiveState();
 
 #ifdef EIE_ASCII
 #endif /* EIE_ASCII */
