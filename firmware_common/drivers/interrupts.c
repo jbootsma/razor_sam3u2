@@ -28,20 +28,19 @@ All Global variable names shall start with "G_<type>ISR"
 ***********************************************************************************************************************/
 /* New variables */
 
-
 /*--------------------------------------------------------------------------------------------------------------------*/
-/* Existing variables (defined in other files -- should all contain the "extern" keyword)  */
-extern volatile u32 G_u32SystemTime1ms;                /*!< @brief From main.c */
-extern volatile u32 G_u32SystemTime1s;                 /*!< @brief From main.c */
-extern volatile u32 G_u32SystemFlags;                  /*!< @brief From main.c */
-extern volatile u32 G_u32ApplicationFlags;             /*!< @brief From main.c */
-
+/* Existing variables (defined in other files -- should all contain the "extern"
+ * keyword)  */
+extern volatile u32 G_u32SystemTime1ms;    /*!< @brief From main.c */
+extern volatile u32 G_u32SystemTime1s;     /*!< @brief From main.c */
+extern volatile u32 G_u32SystemFlags;      /*!< @brief From main.c */
+extern volatile u32 G_u32ApplicationFlags; /*!< @brief From main.c */
+extern volatile u32 G_s32SysTickSyncAdj;   /*!< @brief from main.c */
 
 /***********************************************************************************************************************
 Global variable definitions with scope limited to this local application.
 Variables names shall start with "ISR_<type>" and be declared as static.
 ***********************************************************************************************************************/
-
 
 /**********************************************************************************************************************
 Interrupt Service Routine Definitions
@@ -69,32 +68,29 @@ Promises:
 - All NVIC interrupts are disabled and all pending flags are cleared
 
 */
-void InterruptSetup(void)
-{
-  static const u32 au32PriorityConfig[PRIORITY_REGISTERS] = {IPR0_INIT, IPR1_INIT, IPR2_INIT,
-                                                             IPR3_INIT, IPR4_INIT, IPR5_INIT,
-                                                             IPR6_INIT, IPR7_INIT};
+void InterruptSetup(void) {
+  static const u32 au32PriorityConfig[PRIORITY_REGISTERS] = {
+      IPR0_INIT, IPR1_INIT, IPR2_INIT, IPR3_INIT,
+      IPR4_INIT, IPR5_INIT, IPR6_INIT, IPR7_INIT};
 
   /* Disable all interrupts and ensure pending bits are clear */
-  for(u8 i = 0; i < U8_SAM3U2_INTERRUPT_SOURCES; i++)
-  {
-    NVIC_DisableIRQ( (IRQn_Type)i );
-    NVIC_ClearPendingIRQ( (IRQn_Type)i);
+  for (u8 i = 0; i < U8_SAM3U2_INTERRUPT_SOURCES; i++) {
+    NVIC_DisableIRQ((IRQn_Type)i);
+    NVIC_ClearPendingIRQ((IRQn_Type)i);
   }
 
-  // HACK: modern CMSIS treats the registers as 8-bit registers, and really encourages using
-  // NVIC_SetPriority and friends instead. I didn't want to change the existing code too
-  // drastically, so for now use a cast to get the old behavior back.
-  __IOM u32* pu32PrioRegs = (__IOM u32*)(&NVIC->IP);
+  // HACK: modern CMSIS treats the registers as 8-bit registers, and really
+  // encourages using NVIC_SetPriority and friends instead. I didn't want to
+  // change the existing code too drastically, so for now use a cast to get the
+  // old behavior back.
+  __IOM u32 *pu32PrioRegs = (__IOM u32 *)(&NVIC->IP);
 
   /* Set interrupt priorities */
-  for(u8 i = 0; i < PRIORITY_REGISTERS; i++)
-  {
+  for (u8 i = 0; i < PRIORITY_REGISTERS; i++) {
     pu32PrioRegs[i] = au32PriorityConfig[i];
   }
 
 } /* end InterruptSetup(void) */
-
 
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn ISR void SysTick_Handler(void)
@@ -114,20 +110,26 @@ Promises:
 - G_u32SystemTime1ms counter is incremented by 1
 
 */
-void SysTick_Handler(void)
-{
+void SysTick_Handler(void) {
   /* Clear the sleep flag */
   G_u32SystemFlags &= ~_SYSTEM_SLEEPING;
 
   /* Update Timers */
   G_u32SystemTime1ms++;
-  if( (G_u32SystemTime1ms % 1000) == 0)
-  {
+  if ((G_u32SystemTime1ms % 1000) == 0) {
     G_u32SystemTime1s++;
   }
 
-} /* end SysTickHandler(void) */
+  // Need to atomically consume any error amount to avoid races with the sync
+  // event itself. When close to sync this could actually happen more than you'd
+  // think.
+  __disable_irq();
+  s32 s32Err = G_s32SysTickSyncAdj;
+  G_s32SysTickSyncAdj = 0;
+  __enable_irq();
 
+  SysTick->LOAD = U32_SYSTICK_COUNT + s32Err - 1;
+} /* end SysTickHandler(void) */
 
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn ISR void PIOA_IrqHandler(void)
@@ -145,8 +147,7 @@ Promises:
   and initializes the button's debounce timer.
 
 */
-void PIOA_IrqHandler(void)
-{
+void PIOA_IrqHandler(void) {
   u32 u32GPIOInterruptSources;
   u32 u32ButtonInterrupts;
   u32 u32CurrentButtonLocation;
@@ -154,22 +155,19 @@ void PIOA_IrqHandler(void)
   /* Grab a snapshot of the current PORTA status flags (clears all flags) */
   u32GPIOInterruptSources = PIOA->PIO_ISR;
 
-  /******** DO NOT set a breakpoint before this line of the ISR because the debugger
-  will "read" PIO_ISR and clear the flags. ********/
+  /******** DO NOT set a breakpoint before this line of the ISR because the
+  debugger will "read" PIO_ISR and clear the flags. ********/
 
   /* Examine button interrupts */
   u32ButtonInterrupts = u32GPIOInterruptSources & GPIOA_BUTTONS;
 
   /* Check if any port A buttons interrupted */
-  if(u32ButtonInterrupts)
-  {
+  if (u32ButtonInterrupts) {
     /* Scan through the flags looking for ones that are set */
     u32CurrentButtonLocation = 0x00000001;
-    for(u8 i = 0; i < 32; i++)
-    {
+    for (u8 i = 0; i < 32; i++) {
       /* If the bit is set, then start debouncing (also disables interrupt) */
-      if(u32ButtonInterrupts & u32CurrentButtonLocation)
-      {
+      if (u32ButtonInterrupts & u32CurrentButtonLocation) {
         ButtonStartDebounce(u32CurrentButtonLocation, PORTA);
       }
 
@@ -183,7 +181,6 @@ void PIOA_IrqHandler(void)
   NVIC_ClearPendingIRQ(PIOA_IRQn);
 
 } /* end PIOA_IrqHandler() */
-
 
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn ISR void PIOB_IrqHandler(void)
@@ -201,8 +198,7 @@ Promises:
   and initializes the button's debounce timer.
 
 */
-void PIOB_IrqHandler(void)
-{
+void PIOB_IrqHandler(void) {
   u32 u32GPIOInterruptSources;
   u32 u32ButtonInterrupts;
   u32 u32CurrentButtonLocation;
@@ -210,22 +206,19 @@ void PIOB_IrqHandler(void)
   /* Grab a snapshot of the current PORTB status flags (clears all flags) */
   u32GPIOInterruptSources = PIOB->PIO_ISR;
 
-  /******** DO NOT set a breakpoint before this line of the ISR because the debugger
-  will "read" PIO_ISR and clear the flags. ********/
+  /******** DO NOT set a breakpoint before this line of the ISR because the
+  debugger will "read" PIO_ISR and clear the flags. ********/
 
   /* Examine button interrupts */
   u32ButtonInterrupts = u32GPIOInterruptSources & GPIOB_BUTTONS;
 
   /* Check if any port B buttons interrupted */
-  if(u32ButtonInterrupts)
-  {
+  if (u32ButtonInterrupts) {
     /* Scan through the flags looking for ones that are set */
     u32CurrentButtonLocation = 0x00000001;
-    for(u8 i = 0; i < 32; i++)
-    {
+    for (u8 i = 0; i < 32; i++) {
       /* If the bit is set, then start debouncing (also disables interrupt) */
-      if(u32ButtonInterrupts & u32CurrentButtonLocation)
-      {
+      if (u32ButtonInterrupts & u32CurrentButtonLocation) {
         ButtonStartDebounce(u32CurrentButtonLocation, PORTB);
       }
 
@@ -239,7 +232,6 @@ void PIOB_IrqHandler(void)
   NVIC_ClearPendingIRQ(PIOB_IRQn);
 
 } /* end PIOB_IrqHandler() */
-
 
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn ISR void HardFault_Handler(void)
@@ -258,8 +250,7 @@ Promises:
 - Code is held here for debug purposes
 
 */
-void HardFault_Handler(void)
-{
+void HardFault_Handler(void) {
 #ifdef EIE_ASCII
   LedOff(WHITE);
   LedOff(CYAN);
@@ -294,12 +285,10 @@ void HardFault_Handler(void)
 #endif /* EIE_DOTMATRIX_R01 */
 #endif /* EIE_DOTMATRIX */
 
-  while(1);  /* !!!!! update to log and/or report error and/or restart */
+  while (1)
+    ; /* !!!!! update to log and/or report error and/or restart */
 
 } /* end HardFault_Handler() */
-
-
-
 
 /*--------------------------------------------------------------------------------------------------------------------*/
 /* End of File */

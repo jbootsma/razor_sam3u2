@@ -62,6 +62,7 @@ extern volatile u32 G_u32SystemTime1ms;        /*!< @brief From main.c */
 extern volatile u32 G_u32SystemTime1s;         /*!< @brief From main.c */
 extern volatile u32 G_u32SystemFlags;          /*!< @brief From main.c */
 extern volatile u32 G_u32ApplicationFlags;     /*!< @brief From main.c */
+extern volatile s32 G_s32SysTickSyncAdj;       /*!< @brief From main.c */
 
 extern volatile u32 G_u32DebugFlags;           /*!< @brief From debug.c */
 
@@ -244,6 +245,74 @@ void SysTickSetup(void)
   SysTick->CTRL = SYSTICK_CTRL_INIT;
 
 } /* end SysTickSetup() */
+
+
+/*!---------------------------------------------------------------------------------------------------------------------
+@brief Attempt to synchronize the 1ms timer to a specific event.
+
+This should be called regularly in order to achieve actual synchronization. Each call will adjust
+the next systick period by up to 5% in order to move the 1ms tick and the sync event closer to
+being in sync (it is assumed here that the sync event occurs on multiples of 1ms).
+
+This function allows a target diff to be applied too in case the 1ms timer should lag or lead the
+specified event.
+
+Requires:
+- Systick has been setup and is providing a 1ms periodic interrupt.
+
+Promises:
+- The periodic interrupt time will be adjusted by up to 5% in order to synchronize to the event.
+
+@parameter u32Measured_ The measured value of the systick counter when the event occurred.
+@parameter s32TgtDiff_ The amount of desired counter ticks between the event occuring and the 1ms
+                       tick occuring (ie. If positive the goal is to have the tick slightly after
+                       the sync event.)
+*/
+void SysTickSyncEvt(u32 u32Measured_, s32 s32TgtDiff_)
+{
+  // Signed math is okay here because systick values are all 24 bits, and it makes the delta
+  // calculations much easier.
+
+  // In order to account for the fact that the actual reload value is being adjusted on the fly,
+  // it's best to frame the problem as "what should the measured value be", and handle the cases
+  // of the event occuring before or after wraparound separately.
+
+  // If diff is positive the sync event should happen before the systick. Since it's a downcounter
+  // that means we add the diff to the target. (higher numbers are earlier).
+  s32 s32Tgt = U32_SYSTICK_COUNT + s32TgtDiff_;
+  s32 s32Actual = u32Measured_;
+
+  // Move the target for the case where the measurement was before the reload.
+  if (s32Actual < (U32_SYSTICK_COUNT / 2)) {
+    s32Tgt -= U32_SYSTICK_COUNT;
+  }
+
+  s32 s32Err = s32Tgt - s32Actual;
+
+  // Reduce error by a factor of 10 to smooth out changes. This is basically a P only PID
+  // controller. The rounding here is away from 0 to ensure there's always some signal unless error
+  // really is 0. This is relying on C99's specification that integer division truncates towards 0.
+  if (s32Err > 0) {
+    s32Err = (s32Err + 9) / 10;
+  } else {
+    s32Err = (s32Err - 9) / 10;
+  }
+
+  // err < 0 means the event happened earlier than desired. So we want a shorter period, which means
+  // an adjustment < 0 as well, so no need to flip signs.
+
+  // Cap the adjustment to 2% of the period, to avoid suprises if most of the CPU time is being used.
+  static const s32 s32MaxAdjust = (U32_SYSTICK_COUNT * 2) / 100;
+
+  if (s32Err > s32MaxAdjust) {
+    s32Err = s32MaxAdjust;
+  } else if (s32Err < -s32MaxAdjust) {
+    s32Err = -s32MaxAdjust;
+  }
+
+  // No need for __disable_irq() here, a single write is already atomic.
+  G_s32SysTickSyncAdj = s32Err;
+}
 
 
 /*!---------------------------------------------------------------------------------------------------------------------
