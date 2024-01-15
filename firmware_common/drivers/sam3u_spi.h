@@ -1,5 +1,5 @@
 /*!**********************************************************************************************************************
-@file sam3u_spi.h                                                                
+@file sam3u_spi.h
 @brief Header file for sam3u_spi.c
 **********************************************************************************************************************/
 
@@ -12,33 +12,33 @@
 Type Definitions
 **********************************************************************************************************************/
 
-/*! 
+/*!
 @enum SpiBitOrderType
-@brief Controlled list to specify data transfer bit order. 
+@brief Controlled list to specify data transfer bit order.
 */
 typedef enum {SPI_MSB_FIRST, SPI_LSB_FIRST} SpiBitOrderType;
 
-/*! 
+/*!
 @enum SpiModeType
-@brief Controlled list of SPI modes. 
+@brief Controlled list of SPI modes.
 */
 typedef enum {SPI_MASTER, SPI_SLAVE} SpiModeType;
 
-/*! 
+/*!
 @enum SpiRxStatusType
-@brief Controlled list of SPI peripheral Rx status. 
+@brief Controlled list of SPI peripheral Rx status.
 */
 typedef enum {SPI_RX_EMPTY = 0, SPI_RX_WAITING, SPI_RX_RECEIVING, SPI_RX_COMPLETE, SPI_RX_TIMEOUT, SPI_RX_INVALID} SpiRxStatusType;
 
 
-/*! 
+/*!
 @struct SpiConfigurationType
-@brief User-defined SPI configuration information 
+@brief User-defined SPI configuration information
 */
-typedef struct 
+typedef struct
 {
   PeripheralType SpiPeripheral;       /*!< @brief Easy name of peripheral */
-  AT91PS_PIO pCsGpioAddress;          /*!< @brief Base address for GPIO port for chip select line */
+  Pio* pCsGpioAddress;                /*!< @brief Base address for GPIO port for chip select line */
   u32 u32CsPin;                       /*!< @brief Pin location for SSEL line */
   SpiBitOrderType eBitOrder;          /*!< @brief MSB_FIRST or LSB_FIRST: this is only available in SPI_SLAVE_FLOW_CONTROL mode */
   SpiModeType eSpiMode;               /*!< @brief Type of SPI configured */
@@ -48,14 +48,14 @@ typedef struct
 } SpiConfigurationType;
 
 
-/*! 
+/*!
 @struct SpiPeripheralType
-@brief Full definition of SPI peripheral 
+@brief Full definition of SPI peripheral
 */
-typedef struct 
+typedef struct
 {
-  AT91PS_SPI pBaseAddress;            /*!< @brief Base address of the associated peripheral */
-  AT91PS_PIO pCsGpioAddress;          /*!< @brief Base address for GPIO port for chip select line */
+  Spi* pBaseAddress;                  /*!< @brief Base address of the associated peripheral */
+  Pio* pCsGpioAddress;                /*!< @brief Base address for GPIO port for chip select line */
   u32 u32CsPin;                       /*!< @brief Pin location for SSEL line */
   SpiBitOrderType eBitOrder;          /*!< @brief MSB_FIRST or LSB_FIRST: this is only available in SPI_SLAVE_FLOW_CONTROL mode */
   SpiModeType eSpiMode;               /*!< @brief Type of SPI configured */
@@ -107,7 +107,7 @@ Constants / Definitions
 **********************************************************************************************************************/
 
 /*-------------------------------------------------------------------------------------------------------------------*/
-/*! @publicsection */                                                                                            
+/*! @publicsection */
 /*-------------------------------------------------------------------------------------------------------------------*/
 SpiPeripheralType* SpiRequest(SpiConfigurationType* psSpiConfig_);
 void SpiRelease(SpiPeripheralType* psSpiPeripheral_);
@@ -121,7 +121,7 @@ SpiRxStatusType SpiQueryReceiveStatus(SpiPeripheralType* psSpiPeripheral_);
 
 
 /*-------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */                                                                                            
+/*! @protectedsection */
 /*-------------------------------------------------------------------------------------------------------------------*/
 void SpiInitialize(void);
 void SpiRunActiveState(void);
@@ -132,7 +132,7 @@ void SPI0_IrqHandler(void);
 
 
 /*-------------------------------------------------------------------------------------------------------------------*/
-/*! @privatesection */                                                                                            
+/*! @privatesection */
 /*-------------------------------------------------------------------------------------------------------------------*/
 
 
@@ -140,7 +140,7 @@ void SPI0_IrqHandler(void);
 State Machine Declarations
 ***********************************************************************************************************************/
 static void SpiSM_Idle(void);
-static void SpiSM_Error(void);         
+static void SpiSM_Error(void);
 
 
 #endif /* __SAM3U_SPI_H */

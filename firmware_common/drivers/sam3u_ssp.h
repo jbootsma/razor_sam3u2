@@ -1,5 +1,5 @@
 /*!**********************************************************************************************************************
-@file sam3u_ssp.h                                                                
+@file sam3u_ssp.h
 @brief Header file for sam3u_ssp.c
 **********************************************************************************************************************/
 
@@ -12,32 +12,32 @@
 Type Definitions
 **********************************************************************************************************************/
 
-/*! 
+/*!
 @enum SspBitOrderType
-@brief Controlled list to specify data transfer bit order. 
+@brief Controlled list to specify data transfer bit order.
 */
 typedef enum {SSP_MSB_FIRST, SSP_LSB_FIRST} SspBitOrderType;
 
-/*! 
+/*!
 @enum SspModeType
-@brief Controlled list of SSP modes. 
+@brief Controlled list of SSP modes.
 */
 typedef enum {SSP_MASTER_AUTO_CS, SSP_MASTER_MANUAL_CS, SSP_SLAVE, SSP_SLAVE_FLOW_CONTROL} SspModeType;
 
-/*! 
+/*!
 @enum SspRxStatusType
-@brief Controlled list of SSP Rx peripheral status. 
+@brief Controlled list of SSP Rx peripheral status.
 */
 typedef enum {SSP_RX_EMPTY = 0, SSP_RX_WAITING, SSP_RX_RECEIVING, SSP_RX_COMPLETE, SSP_RX_TIMEOUT, SSP_RX_INVALID} SspRxStatusType;
 
-/*! 
+/*!
 @struct SspConfigurationType
-@brief User-defined SSP configuration information 
+@brief User-defined SSP configuration information
 */
-typedef struct 
+typedef struct
 {
   PeripheralType SspPeripheral;       /*!< @brief Easy name of peripheral */
-  AT91PS_PIO pCsGpioAddress;          /*!< @brief Base address for GPIO port for chip select line */
+  Pio* pCsGpioAddress;                /*!< @brief Base address for GPIO port for chip select line */
   u32 u32CsPin;                       /*!< @brief Pin location for SSEL line */
   SspBitOrderType eBitOrder;          /*!< @brief SSP_MSB_FIRST or SSP_LSB_FIRST: this is only available in SSP_SLAVE_FLOW_CONTROL mode */
   SspModeType eSspMode;               /*!< @brief Type of SPI configured */
@@ -50,14 +50,14 @@ typedef struct
 } SspConfigurationType;
 
 
-/*! 
+/*!
 @struct SspPeripheralType
-@brief Full definition of SSP peripheral 
+@brief Full definition of SSP peripheral
 */
-typedef struct 
+typedef struct
 {
-  AT91PS_USART pBaseAddress;          /*!< @brief Base address of the associated peripheral */
-  AT91PS_PIO pCsGpioAddress;          /*!< @brief Base address for GPIO port for chip select line */
+  Usart* pBaseAddress;                /*!< @brief Base address of the associated peripheral */
+  Pio* pCsGpioAddress;                /*!< @brief Base address for GPIO port for chip select line */
   u32 u32CsPin;                       /*!< @brief Pin location for SSEL line */
   SspBitOrderType eBitOrder;          /*!< @brief SSP_MSB_FIRST or SSP_LSB_FIRST: this is only available in SSP_SLAVE_FLOW_CONTROL mode */
   SspModeType eSspMode;               /*!< @brief Type of SPI configured */
@@ -111,7 +111,7 @@ Constants / Definitions
 **********************************************************************************************************************/
 
 /*-------------------------------------------------------------------------------------------------------------------*/
-/*! @publicsection */                                                                                            
+/*! @publicsection */
 /*-------------------------------------------------------------------------------------------------------------------*/
 SspPeripheralType* SspRequest(SspConfigurationType* psSspConfig_);
 void SspRelease(SspPeripheralType* psSspPeripheral_);
@@ -128,7 +128,7 @@ SspRxStatusType SspQueryReceiveStatus(SspPeripheralType* psSspPeripheral_);
 
 
 /*-------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */                                                                                            
+/*! @protectedsection */
 /*-------------------------------------------------------------------------------------------------------------------*/
 void SspInitialize(void);
 void SspRunActiveState(void);
@@ -141,7 +141,7 @@ void SSP2_IRQHandler(void);
 
 
 /*-------------------------------------------------------------------------------------------------------------------*/
-/*! @privatesection */                                                                                            
+/*! @privatesection */
 /*-------------------------------------------------------------------------------------------------------------------*/
 static void SspGenericHandler(void);
 
@@ -150,7 +150,7 @@ static void SspGenericHandler(void);
 State Machine Declarations
 ***********************************************************************************************************************/
 static void SspSM_Idle(void);
-static void SspSM_Error(void);         
+static void SspSM_Error(void);
 
 
 #endif /* __SAM3U_SSP_H */

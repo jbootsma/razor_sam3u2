@@ -1,6 +1,6 @@
 /*!**********************************************************************************************************************
-@file buttons.c                                                                
-@brief Button functions and state machine.  
+@file buttons.c
+@brief Button functions and state machine.
 
 The application handles all debouncing and button press / hold detection.
 All buttons use interrupts to trigger the start and end
@@ -64,13 +64,13 @@ Function Definitions
 ***********************************************************************************************************************/
 
 /*------------------------------------------------------------------------------------------------------------------*/
-/*! @publicsection */                                                                                            
+/*! @publicsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn bool IsButtonPressed(ButtonNameType eButton_)
 
-@brief Determine if a particular button is currently pressed at the moment in time when 
+@brief Determine if a particular button is currently pressed at the moment in time when
 the function is called.
 
 The button must still be pressed at the time of this inquiry for the function
@@ -79,10 +79,10 @@ to return TRUE.
 Requires:
 - Button_asStatus[eButton_] is a valid index
 
-@param eButton_ is a valid button 
- 
+@param eButton_ is a valid button
+
 Promises:
-- Returns TRUE if Button_asStatus[eButton_].eCurrentState is PRESSED 
+- Returns TRUE if Button_asStatus[eButton_].eCurrentState is PRESSED
 - Otherwise returns FALSE
 
 */
@@ -103,23 +103,23 @@ bool IsButtonPressed(ButtonNameType eButton_)
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn bool WasButtonPressed(ButtonNameType eButton_)
 
-@brief Determines if a particular button was pressed since last time it was checked. 
+@brief Determines if a particular button was pressed since last time it was checked.
 
 This is effectively a latching function so that button presses are
 not missed and are potentially available to multiple tasks.
 
 The button may or may not still be pressed when this inquiry is made.  Mulitple
 button presses are not tracked.  The user should call ButtonAcknowledge immediately
-following this function to clear the state. If multiple tasks need the button 
+following this function to clear the state. If multiple tasks need the button
 information, only the last function should call ButtonAcknowledge.
 
 Requires:
 - Button_asStatus[eButton_] is a valid index
 
-@param eButton_ is a valid button 
- 
+@param eButton_ is a valid button
+
 Promises:
-- Returns TRUE if Button_asStatus[eButton_].bNewPressFlag is TRUE 
+- Returns TRUE if Button_asStatus[eButton_].bNewPressFlag is TRUE
 - Otherwise returns FALSE
 
 */
@@ -143,12 +143,12 @@ bool WasButtonPressed(ButtonNameType eButton_)
 @brief Clears the "New Press" flag of a button so WasButtonPressed() no longer returns TRUE
 unless a new button press occurs.
 
-This function is generally always called after WasButtonPressed() returns TRUE unless 
+This function is generally always called after WasButtonPressed() returns TRUE unless
 it is known that other tasks may need the button pressed information.
 
 Requires:
 @param eButton_ is a valid button index
- 
+
 Promises:
 - The flag at Button_asStatus[eButton_].bNewPressFlag is set to FALSE
 
@@ -163,15 +163,15 @@ void ButtonAcknowledge(ButtonNameType eButton_)
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn bool IsButtonHeld(ButtonNameType eButton_, u32 u32ButtonHeldTime_)
 
-@brief Queries to see if a button has been held for a certain time.  
+@brief Queries to see if a button has been held for a certain time.
 
 The button must still be pressed when this function is called if it is to return TRUE.
 This is a non-latching function.
 
 Requires:
 @param eButton_ is a valid button index
-@param u32ButtonHeldTime_ is a time in ms 
- 
+@param u32ButtonHeldTime_ is a time in ms
+
 Promises:
 - Returns TRUE if eButton_ has been held longer than u32ButtonHeldTime_
 - Otherwise returns FALSE
@@ -179,7 +179,7 @@ Promises:
 */
 bool IsButtonHeld(ButtonNameType eButton_, u32 u32ButtonHeldTime_)
 {
- if( (Button_asStatus[(u8)eButton_].eCurrentState == PRESSED) && 
+ if( (Button_asStatus[(u8)eButton_].eCurrentState == PRESSED) &&
       IsTimeUp(&Button_asStatus[eButton_].u32DebounceTimeStart, u32ButtonHeldTime_ ) )
  {
    return(TRUE);
@@ -193,20 +193,20 @@ bool IsButtonHeld(ButtonNameType eButton_, u32 u32ButtonHeldTime_)
 
 
 /*------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */                                                                                            
+/*! @protectedsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn void ButtonInitialize(void)
 
-@brief Runs required initialization for the task.  
+@brief Runs required initialization for the task.
 
 Should only be called once in main init section.
 
 
 Requires:
 - NONE
- 
+
 Promises:
 - The Button task is configured
 - Button interrupts are active on PIOA and PIOB
@@ -216,7 +216,7 @@ Promises:
 void ButtonInitialize(void)
 {
   u32 u32Dummy;
-  
+
   /* Setup default data for all of the buttons in the system */
   for(u8 i = 0; i < U8_TOTAL_BUTTONS; i++)
   {
@@ -225,23 +225,23 @@ void ButtonInitialize(void)
     Button_asStatus[i].eCurrentState = RELEASED;
     Button_asStatus[i].eNewState     = RELEASED;
     Button_asStatus[i].u32TimeStamp  = 0;
-    Button_asStatus[i].u32DebounceTimeStart = 0;    
+    Button_asStatus[i].u32DebounceTimeStart = 0;
   }
 
   /* Enable PIO interrupts */
-  AT91C_BASE_PIOA->PIO_IER = GPIOA_BUTTONS;
-  AT91C_BASE_PIOB->PIO_IER = GPIOB_BUTTONS;
-  
+  PIOA->PIO_IER = GPIOA_BUTTONS;
+  PIOB->PIO_IER = GPIOB_BUTTONS;
+
   /* Dummy code to read the ISR registers and clear the flags */
-  u32Dummy  = AT91C_BASE_PIOA->PIO_ISR;
-  u32Dummy |= AT91C_BASE_PIOB->PIO_ISR;
+  u32Dummy  = PIOA->PIO_ISR;
+  u32Dummy |= PIOB->PIO_ISR;
 
   /* Configure the NVIC to ensure the PIOA and PIOB interrupts are active */
-  NVIC_ClearPendingIRQ(IRQn_PIOA);
-  NVIC_ClearPendingIRQ(IRQn_PIOB);
-  NVIC_EnableIRQ(IRQn_PIOA);
-  NVIC_EnableIRQ(IRQn_PIOB);
-    
+  NVIC_ClearPendingIRQ(PIOA_IRQn);
+  NVIC_ClearPendingIRQ(PIOB_IRQn);
+  NVIC_EnableIRQ(PIOA_IRQn);
+  NVIC_EnableIRQ(PIOB_IRQn);
+
   /* Init complete: set function pointer and application flag */
   Button_pfnStateMachine = ButtonSM_Idle;
   G_u32ApplicationFlags |= _APPLICATION_FLAGS_BUTTON;
@@ -274,7 +274,7 @@ void ButtonRunActiveState(void)
 /*!----------------------------------------------------------------------------------------------------------------------
 @fn void ButtonStartDebounce(u32 u32BitPosition_, PortOffsetType ePort_)
 
-@brief Called only from ISR: sets the "debounce active" flag and debounce start time  
+@brief Called only from ISR: sets the "debounce active" flag and debounce start time
 
 Requires:
 - Only the PIOA or PIOB ISR should call this function
@@ -290,7 +290,7 @@ corresponding interrupt is disabled and debounce information is set in Button_as
 void ButtonStartDebounce(u32 u32BitPosition_, PortOffsetType ePort_)
 {
   ButtonNameType eButton = NOBUTTON;
-  
+
   /* Parse through to find the button */
   for(u8 i = 0; i < U8_TOTAL_BUTTONS; i++)
   {
@@ -301,20 +301,20 @@ void ButtonStartDebounce(u32 u32BitPosition_, PortOffsetType ePort_)
       break;
     }
   }
-  
+
   /* If the button has been found, disable the interrupt and update debounce status */
   if(eButton != NOBUTTON)
   {
-    AT91C_BASE_PIOA->PIO_IDR |= u32BitPosition_;
+    PIOA->PIO_IDR |= u32BitPosition_;
     Button_asStatus[(u8)eButton].bDebounceActive = TRUE;
     Button_asStatus[(u8)eButton].u32DebounceTimeStart = G_u32SystemTime1ms;
   }
-  
+
 } /* end ButtonStartDebounce() */
- 
+
 
 /*------------------------------------------------------------------------------------------------------------------*/
-/*! @privatesection */                                                                                            
+/*! @privatesection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
 
@@ -330,7 +330,7 @@ maintaining the global button states.
 
 @brief Look for at least one button to enter debouncing state
 */
-static void ButtonSM_Idle(void)                
+static void ButtonSM_Idle(void)
 {
   for(u8 i = 0; i < U8_TOTAL_BUTTONS; i++)
   {
@@ -340,7 +340,7 @@ static void ButtonSM_Idle(void)
       break;
     }
   }
-  
+
 } /* end ButtonSM_Idle(void) */
 
 
@@ -352,7 +352,7 @@ static void ButtonSM_Idle(void)
 Time out the debounce period and set the "pressed" state if button action is confirmed.
 Manage the hold timers.
 */
-static void ButtonSM_ButtonActive(void)         
+static void ButtonSM_ButtonActive(void)
 {
   u32 *pu32PortAddress;
   u32 *pu32InterruptAddress;
@@ -364,15 +364,15 @@ static void ButtonSM_ButtonActive(void)
   for(u8 i = 0; i < U8_TOTAL_BUTTONS; i++)
   {
     /* Load address offsets for the current button */
-    pu32PortAddress = (u32*)(&(AT91C_BASE_PIOA->PIO_PDSR) + G_asBspButtonConfigurations[i].ePort);
-    pu32InterruptAddress = (u32*)(&(AT91C_BASE_PIOA->PIO_IER) + G_asBspButtonConfigurations[i].ePort);
-    
+    pu32PortAddress = (u32*)(&(PIOA->PIO_PDSR) + G_asBspButtonConfigurations[i].ePort);
+    pu32InterruptAddress = (u32*)(&(PIOA->PIO_IER) + G_asBspButtonConfigurations[i].ePort);
+
     /* Check if the current button is debouncing */
     if( Button_asStatus[i].bDebounceActive )
     {
       /* Still have an active button */
       Button_pfnStateMachine = ButtonSM_ButtonActive;
-      
+
       /* Check if debounce period is over */
       if( IsTimeUp(&Button_asStatus[i].u32DebounceTimeStart, U32_DEBOUNCE_TIME) )
       {
@@ -381,7 +381,7 @@ static void ButtonSM_ButtonActive(void)
         {
           /* Read PIO_PDSR to get the actual input signal (new button state) */
           if( ~(*pu32PortAddress) & G_asBspButtonConfigurations[i].u32BitPosition )
-          {          
+          {
             Button_asStatus[i].eNewState = PRESSED;
           }
           else
@@ -394,7 +394,7 @@ static void ButtonSM_ButtonActive(void)
         {
           /* Read PIO_PDSR to get the actual input signal (new button state) */
           if( *pu32PortAddress & G_asBspButtonConfigurations[i].u32BitPosition )
-          {          
+          {
             Button_asStatus[i].eNewState = PRESSED;
           }
           else
@@ -402,12 +402,12 @@ static void ButtonSM_ButtonActive(void)
             Button_asStatus[i].eNewState = RELEASED;
           }
         }
-        
+
         /* Update if the button state has changed */
         if( Button_asStatus[i].eNewState != Button_asStatus[i].eCurrentState )
         {
           Button_asStatus[i].eCurrentState = Button_asStatus[i].eNewState;
-          
+
           /* If the new state is PRESSED, update the new press flag */
           if(Button_asStatus[i].eCurrentState == PRESSED)
           {
@@ -419,11 +419,11 @@ static void ButtonSM_ButtonActive(void)
         /* Regardless of a good press or not, clear the debounce active flag and re-enable the interrupts */
         Button_asStatus[i].bDebounceActive = FALSE;
         *pu32InterruptAddress = G_asBspButtonConfigurations[i].u32BitPosition;
-        
+
       } /* end if( IsTimeUp...) */
     } /* end if(Button_asStatus[i].bDebounceActive) */
   } /* end for (u8 i = 0; i < U8_TOTAL_BUTTONS; i++) */
-  
+
 } /* end ButtonSM_ButtonActive() */
 
 
@@ -431,11 +431,11 @@ static void ButtonSM_ButtonActive(void)
 /*!-------------------------------------------------------------------------------------------------------------------
 @fn static void ButtonSM_Error(void)
 
-@brief Handle an error here.  For now, the task is just held in this state. 
+@brief Handle an error here.  For now, the task is just held in this state.
 */
-static void ButtonSM_Error(void)          
+static void ButtonSM_Error(void)
 {
-  
+
 } /* end ButtonSM_Error() */
 #endif
 

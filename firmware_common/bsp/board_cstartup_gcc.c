@@ -63,7 +63,7 @@ __attribute__((section(".intvec"))) const void *const vector_table[64] = {
 
 void c_startup(void) {
   // Make sure our vector table is the one actually used.
-  AT91C_BASE_NVIC->NVIC_VTOFFR = ((uintptr_t)(&vector_table));
+  SCB->VTOR = ((uintptr_t)(&vector_table));
 
   // Init .data
   memcpy(_data_start, _data_load, (size_t)(_data_end - _data_start));

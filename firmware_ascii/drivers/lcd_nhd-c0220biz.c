@@ -1,5 +1,5 @@
 /*!**********************************************************************************************************************
-@file lcd_nhd-c0220biz.c                                                                
+@file lcd_nhd-c0220biz.c
 @brief Driver for Newhaven Display NHD-C0220BiZ ASCII LCD.
 
 This application requires an IIC (TWI) resource to output data.
@@ -9,8 +9,8 @@ The displayable area of the screen is 20 characters x 2 lines, though the LCD RA
 Each character has a 1-byte address. Mnemonics are defined for the main locations
 
 Line #      Left most address             Last printed char           Right most address
-  1       0x00 (LINE1_START_ADDR)       0x13 (LINE1_END_ADDR)       0x27 (LINE1_END_ABSOLUTE)      
-  2       0x40 (LINE2_START_ADDR)       0x53 (LINE2_END_ADDR)       0x67 (LINE2_END_ABSOLUTE)      
+  1       0x00 (LINE1_START_ADDR)       0x13 (LINE1_END_ADDR)       0x27 (LINE1_END_ABSOLUTE)
+  2       0x40 (LINE2_START_ADDR)       0x53 (LINE2_END_ADDR)       0x67 (LINE2_END_ABSOLUTE)
 
 ------------------------------------------------------------------------------------------------------------------------
 GLOBALS
@@ -65,13 +65,13 @@ static u32 Lcd_u32Timer;                        /*!< @brief Timeout counter used
 ***********************************************************************************************************************/
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/*! @publicsection */                                                                                            
+/*! @publicsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
 /*!---------------------------------------------------------------------------------------------------------------------
 @fn void LcdCommand(u8 u8Command_)
 
-@brief Queues a command char to be sent to the LCD using the TWI messaging function. 
+@brief Queues a command char to be sent to the LCD using the TWI messaging function.
 
 Some common commands are shown below.
 LCD_CLEAR_CMD				Writes spaces to all chars
@@ -102,8 +102,8 @@ void LcdCommand(u8 u8Command_)
 
   /* Update the command paramter into the command array */
   au8LCDWriteCommand[1] = u8Command_;
-    
-  /* Queue the command to the I²C application */
+
+  /* Queue the command to the Iï¿½C application */
   TwiWriteData(U8_LCD_ADDRESS, sizeof(au8LCDWriteCommand), &au8LCDWriteCommand[0], TWI_STOP);
 
   /* Add a delay during initialization to let the command send properly */
@@ -111,20 +111,20 @@ void LcdCommand(u8 u8Command_)
   {
     for(u32 i = 0; i < 100000; i++);
   }
-  
+
 } /* end LcdCommand() */
 
 
 /*!---------------------------------------------------------------------------------------------------------------------
 @fn void LcdMessage(u8 u8Address_, u8* pu8Message_)
 
-@brief Sends a text message to the LCD to be printed at the address specified.  
+@brief Sends a text message to the LCD to be printed at the address specified.
 
-The message to display is no more than (40 - the selected display location) 
-characters in length.  Any characters not desired on screen that will not be 
+The message to display is no more than (40 - the selected display location)
+characters in length.  Any characters not desired on screen that will not be
 overwritten need to be erased first.
 
-e.g. 
+e.g.
 u8 au8Message[] = "Hello world!";
 LcdMessage(LINE1_START_ADDR, au8Message);
 
@@ -135,25 +135,25 @@ Requires:
 @param pu8Message_ is a pointer to a NULL-terminated C-string
 
 Promises:
-- Message to set cursor address in the LCD is queued, then message data 
-  is queued to the LCD to be displayed. 
+- Message to set cursor address in the LCD is queued, then message data
+  is queued to the LCD to be displayed.
 
 */
 void LcdMessage(u8 u8Address_, u8* pu8Message_)
-{ 
-  u8 u8Index; 
+{
+  u8 u8Index;
   static u8 au8LCDMessage[U8_LCD_MESSAGE_OVERHEAD_SIZE + U8_LCD_MAX_MESSAGE_SIZE] = {LCD_CONTROL_DATA};
-  
+
   /* Set the cursor to the correct address */
   LcdCommand(LCD_ADDRESS_CMD | u8Address_);
-  
+
   /* Fill the message */
   u8Index = 1;
   while(*pu8Message_ != '\0')
   {
     au8LCDMessage[u8Index++] = *pu8Message_++;
   }
-    
+
   /* Queue the message */
   TwiWriteData(U8_LCD_ADDRESS, u8Index, au8LCDMessage, TWI_STOP);
 
@@ -170,36 +170,36 @@ Requires:
 - LCD is initialized
 
 @param u8Address_ is the starting address where the first character will be cleared
-@param u8CharactersToClear_ is the number of characters to clear and does not cause 
+@param u8CharactersToClear_ is the number of characters to clear and does not cause
 the cursor to go past the available data RAM.
 
 Promises:
-- Message to set cursor address in the LCD is queued, then message data 
-  consisting of all ' ' characters is queued to the LCD to be displayed. 
+- Message to set cursor address in the LCD is queued, then message data
+  consisting of all ' ' characters is queued to the LCD to be displayed.
 
 */
 void LcdClearChars(u8 u8Address_, u8 u8CharactersToClear_)
-{ 
-  u8 u8Index; 
+{
+  u8 u8Index;
   static u8 au8LCDMessage[U8_LCD_MESSAGE_OVERHEAD_SIZE + U8_LCD_MAX_MESSAGE_SIZE] =  {LCD_CONTROL_DATA};
-  
+
   /* Set the cursor to the correct address */
   LcdCommand(LCD_ADDRESS_CMD | u8Address_);
-  
+
   /* Fill the message characters with ' ' */
   for(u8Index = 0; u8Index < u8CharactersToClear_; u8Index++)
   {
     au8LCDMessage[u8Index + 1] = ' ';
   }
-      
+
   /* Queue the message */
   TwiWriteData(U8_LCD_ADDRESS, u8CharactersToClear_ + 1, au8LCDMessage, TWI_STOP);
-      	
+
 } /* end LcdClearChars() */
 
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */                                                                                            
+/*! @protectedsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
 /*!--------------------------------------------------------------------------------------------------------------------
@@ -217,33 +217,33 @@ Promises:
 void LcdInitialize(void)
 {
   u8 u8Byte;
-  u8 au8Commands[] = 
+  u8 au8Commands[] =
   {
-    LCD_FUNCTION_CMD, LCD_FUNCTION2_CMD, LCD_BIAS_CMD, 
-    LCD_CONTRAST_CMD, LCD_DISPLAY_SET_CMD, LCD_FOLLOWER_CMD 
+    LCD_FUNCTION_CMD, LCD_FUNCTION2_CMD, LCD_BIAS_CMD,
+    LCD_CONTRAST_CMD, LCD_DISPLAY_SET_CMD, LCD_FOLLOWER_CMD
   };
                  /* "012345567890123456789" */
   u8 au8Welcome[] = "RAZOR SAM3U2 ASCII   ";
-  
+
   /* State to Idle */
   Lcd_pfnStateMachine = LcdSM_Idle;
-  
+
   /* Turn on LCD wait 40 ms for it to setup */
-  AT91C_BASE_PIOB->PIO_SODR = PB_09_LCD_RST;
+  PIOB->PIO_SODR = PB_09_LCD_RST;
   Lcd_u32Timer = G_u32SystemTime1ms;
   while( !IsTimeUp(&Lcd_u32Timer, U8_LCD_STARTUP_DELAY_MS) );
-  
+
   /* Send Control Command */
   u8Byte = LCD_CONTROL_COMMAND;
   TwiWriteData(U8_LCD_ADDRESS, 1, &u8Byte, TWI_NO_STOP);
-  
+
   /* Send Control Commands */
   TwiWriteData(U8_LCD_ADDRESS, sizeof(au8Commands), &au8Commands[0], TWI_NO_STOP);
-  
+
   /* Wait for 200 ms */
   Lcd_u32Timer = G_u32SystemTime1ms;
   while( !IsTimeUp(&Lcd_u32Timer, U8_LCD_CONTROL_COMMAND_DELAY_MS) );
-  
+
   /* Send Final Command to turn it on */
   u8Byte = (LCD_DISPLAY_CMD | LCD_DISPLAY_ON);
   TwiWriteData(U8_LCD_ADDRESS, 1, &u8Byte, TWI_STOP);
@@ -252,11 +252,11 @@ void LcdInitialize(void)
   LedOn(LCD_RED);
   LedOn(LCD_GREEN);
   LedOn(LCD_BLUE);
-  
+
   u8Byte = LCD_CONTROL_DATA;
   TwiWriteData(U8_LCD_ADDRESS, 1,  &u8Byte, TWI_NO_STOP);
   TwiWriteData(U8_LCD_ADDRESS, 20, &au8Welcome[0], TWI_STOP);
-   
+
   Lcd_u32Timer = G_u32SystemTime1ms;
   G_u32ApplicationFlags |= _APPLICATION_FLAGS_LCD;
 
@@ -297,5 +297,5 @@ State Machine Function Declarations
 */
 static void LcdSM_Idle(void)
 {
-  
+
 } /* end LcdSM_Idle() */

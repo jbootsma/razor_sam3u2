@@ -15,7 +15,7 @@
             // "breakAfterReset": true,
             "showDevDebugOutput": "none",
             "servertype": "jlink",
-            "svdPath": "${workspaceFolder}/firmware_common/bsp/ATSAM3U2C.svd",
+            "svdPath": "${workspaceFolder}/firmware_common/cmsis/ATSAM3U2C.svd",
             "preLaunchTask": "Build firmware"
         },
         {

@@ -189,12 +189,12 @@ bool Adc12StartConversion(Adc12ChannelType eAdcChannel_) {
     Adc12_eActiveChannel = eAdcChannel_;
 
     /* Enable the channel and its interrupt */
-    AT91C_BASE_ADC12B->ADC12B_CHER = (1 << eAdcChannel_);
-    AT91C_BASE_ADC12B->ADC12B_IER = (1 << eAdcChannel_);
+    ADC12B->ADC12B_CHER = (1 << eAdcChannel_);
+    ADC12B->ADC12B_IER = (1 << eAdcChannel_);
 
     /* Start the conversion and exit */
     Adc12_bStopRequested = TRUE; // One-shot, stop right away.
-    AT91C_BASE_ADC12B->ADC12B_CR |= AT91C_ADC12B_CR_START;
+    ADC12B->ADC12B_CR |= ADC12B_CR_START;
     return TRUE;
   }
 
@@ -258,30 +258,30 @@ bool Adc12StartContinuousSampling(Adc12ChannelType eAdcChannel_, u16 u16SampleRa
 
   // Pick fastest clock with the range we need.
   u32 u32TicksPerSample = u32MclksPerSample / 2;
-  u32 clk = AT91C_TC_CLKS_TIMER_DIV1_CLOCK;
+  u32 clk = 0;
 
   while (u32TicksPerSample >= 0x10000) {
     u32TicksPerSample /= 4;
-    clk += (AT91C_TC_CLKS_TIMER_DIV2_CLOCK - AT91C_TC_CLKS_TIMER_DIV1_CLOCK);
+    clk += 1;
   }
 
   // The halfway point will be the actual leading edge for samples.
   u32 u32HalfCount = u32TicksPerSample / 2;
 
-  AT91C_BASE_TC2->TC_CMR &= ~AT91C_TC_CLKS;
-  AT91C_BASE_TC2->TC_CMR |= clk;
-  AT91C_BASE_TC2->TC_RA = (u16)u32HalfCount;
-  AT91C_BASE_TC2->TC_RC = (u16)u32TicksPerSample;
+  TC0->TC_CHANNEL[2].TC_CMR &= ~TC_CMR_TCCLKS_Msk;
+  TC0->TC_CHANNEL[2].TC_CMR |= TC_CMR_TCCLKS(clk);
+  TC0->TC_CHANNEL[2].TC_RA = (u16)u32HalfCount;
+  TC0->TC_CHANNEL[2].TC_RC = (u16)u32TicksPerSample;
 
   // Allow the ADC to be triggered by the timer.
-  AT91C_BASE_ADC12B->ADC12B_MR |= AT91C_ADC12B_MR_TRGEN;
+  ADC12B->ADC12B_MR |= ADC12B_MR_TRGEN;
 
   // Enable the channel and it's data ready interrupt.
-  AT91C_BASE_ADC12B->ADC12B_CHER = (1 << eAdcChannel_);
-  AT91C_BASE_ADC12B->ADC12B_IER = (1 << eAdcChannel_);
+  ADC12B->ADC12B_CHER = (1 << eAdcChannel_);
+  ADC12B->ADC12B_IER = (1 << eAdcChannel_);
 
   // Now that everything setup we can start the timer.
-  AT91C_BASE_TC2->TC_CCR = AT91C_TC_CLKEN | AT91C_TC_SWTRG;
+  TC0->TC_CHANNEL[2].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;
 
   return TRUE;
 } /* end Adc12StartContinuousSampling */
@@ -303,10 +303,10 @@ void Adc12StopContinuousSampling(void) {
   }
 
   // Disabling the interrupt here ensures that the sample recording buffer can be safely reclaimed.
-  NVIC_DisableIRQ(IRQn_ADCC0);
+  NVIC_DisableIRQ(ADC12B_IRQn);
   Adc12AssignCallback(Adc12_eActiveChannel, Adc12DefaultCallback);
   Adc12_bStopRequested = TRUE;
-  NVIC_EnableIRQ(IRQn_ADCC0);
+  NVIC_EnableIRQ(ADC12B_IRQn);
 
   // The remainder of cleanup occurs in the IRQ.
 } /* end Adc12StopContinuousSampling */
@@ -420,11 +420,11 @@ void Adc12Initialize(void) {
   u8 au8Adc12Started[] = "ADC12 task initialized\n\r";
 
   /* Initialize peripheral registers. ADC starts totally disabled. */
-  AT91C_BASE_ADC12B->ADC12B_MR = ADC12B_MR_INIT;
-  AT91C_BASE_ADC12B->ADC12B_CHDR = ADC12B_CHDR_INIT;
-  AT91C_BASE_ADC12B->ADC12B_ACR = ADC12B_ACR_INIT;
-  AT91C_BASE_ADC12B->ADC12B_EMR = ADC12B_EMR_INIT;
-  AT91C_BASE_ADC12B->ADC12B_IDR = ADC12B_IDR_INIT;
+  ADC12B->ADC12B_MR = ADC12B_MR_INIT;
+  ADC12B->ADC12B_CHDR = ADC12B_CHDR_INIT;
+  ADC12B->ADC12B_ACR = ADC12B_ACR_INIT;
+  ADC12B->ADC12B_EMR = ADC12B_EMR_INIT;
+  ADC12B->ADC12B_IDR = ADC12B_IDR_INIT;
 
   /* Set all the callbacks to default */
   for (u8 i = 0; i < (sizeof(Adc12_apfCallbacks) / sizeof(fnCode_u16_type)); i++) {
@@ -437,8 +437,8 @@ void Adc12Initialize(void) {
   /* Check initialization and set first state */
   if (1) {
     /* Enable required interrupts */
-    NVIC_ClearPendingIRQ(IRQn_ADCC0);
-    NVIC_EnableIRQ(IRQn_ADCC0);
+    NVIC_ClearPendingIRQ(ADC12B_IRQn);
+    NVIC_EnableIRQ(ADC12B_IRQn);
 
     /* Write message, set "good" flag and select Idle state */
     DebugPrintf(au8Adc12Started);
@@ -490,9 +490,9 @@ void ADCC0_IrqHandler(void) {
   debugging, the debugger reads ADC12B_SR and clears the EOC flag bits */
 
   // Since only 1 channel is enabled at a time we can just check it directly.
-  if (AT91C_BASE_ADC12B->ADC12B_SR & (1 << Adc12_eActiveChannel)) {
+  if (ADC12B->ADC12B_SR & (1 << Adc12_eActiveChannel)) {
     /* Read the channel's result register (clears EOC bit / interrupt) and send to callback */
-    u16Adc12Result = AT91C_BASE_ADC12B->ADC12B_CDR[Adc12_eActiveChannel];
+    u16Adc12Result = ADC12B->ADC12B_CDR[Adc12_eActiveChannel];
     Adc12_apfCallbacks[Adc12_eActiveChannel](u16Adc12Result);
 
     if (Adc12_bStopRequested) {
@@ -500,16 +500,16 @@ void ADCC0_IrqHandler(void) {
       Adc12_bStopRequested = FALSE;
 
       // No more channel sample/interrupts.
-      AT91C_BASE_ADC12B->ADC12B_CHDR = (1 << Adc12_eActiveChannel);
-      AT91C_BASE_ADC12B->ADC12B_IDR = (1 << Adc12_eActiveChannel);
+      ADC12B->ADC12B_CHDR = (1 << Adc12_eActiveChannel);
+      ADC12B->ADC12B_IDR = (1 << Adc12_eActiveChannel);
 
       // Stop the hardware trigger.
-      AT91C_BASE_TC2->TC_CCR = AT91C_TC_CLKDIS;
-      AT91C_BASE_ADC12B->ADC12B_MR &= ~AT91C_ADC12B_MR_TRGEN;
+      TC0->TC_CHANNEL[2].TC_CCR = TC_CCR_CLKDIS;
+      ADC12B->ADC12B_MR &= ~ADC12B_MR_TRGEN;
 
       /* Give the Semaphore back, clear the ADC pending flag and exit */
       Adc12_eActiveChannel = _ADC12_CH_INVLD;
-      NVIC_ClearPendingIRQ(IRQn_ADCC0);
+      NVIC_ClearPendingIRQ(ADC12B_IRQn);
     }
   }
 } /* end ADCC0_IrqHandler() */
@@ -532,8 +532,7 @@ Promises:
 - NONE
 
 */
-void Adc12DefaultCallback(u16 u16Result_) { /* This is an empty function */
-} /* end Adc12DefaultCallback() */
+void Adc12DefaultCallback(u16 u16Result_) {} /* end Adc12DefaultCallback() */
 
 /*!----------------------------------------------------------------------------------------------------------------------
 @brief Callback used to save a sample into the sample buffer.
