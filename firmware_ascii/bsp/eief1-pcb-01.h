@@ -151,6 +151,7 @@ void ClockSetup(void);
 void GpioSetup(void);
 
 void SysTickSetup(void);
+void SysTickSyncEvt(u32 u32Measured_, s32 s32TgtDiff_);
 void SystemTimeCheck(void);
 void SystemSleep(void);
 

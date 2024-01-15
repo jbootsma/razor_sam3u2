@@ -13,9 +13,12 @@ To start a new task using this user_app1 as a template:
  5. Use ctrl-h to find and replace all instances of "UserApp1" with "YourNewTaskName"
  6. Use ctrl-h to find and replace all instances of "USER_APP1" with "YOUR_NEW_TASK_NAME"
  7. Add a call to YourNewTaskNameInitialize() in the init section of main
- 8. Add a call to YourNewTaskNameRunActiveState() in the Super Loop section of main
- 9. Update yournewtaskname.h per the instructions at the top of yournewtaskname.h
-10. Delete this text (between the dashed lines) and update the Description below to describe your task
+ 8. Add a call to YourNewTaskNameRunActiveState() in the Super Loop section of
+main
+ 9. Update yournewtaskname.h per the instructions at the top of
+yournewtaskname.h
+10. Delete this text (between the dashed lines) and update the Description below
+to describe your task
 ----------------------------------------------------------------------------------------------------------------------
 
 ------------------------------------------------------------------------------------------------------------------------
@@ -48,7 +51,8 @@ All Global variable names shall start with "G_<type>UserApp1"
 volatile u32 G_u32UserApp1Flags; /*!< @brief Global state flags */
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/* Existing variables (defined in other files -- should all contain the "extern" keyword) */
+/* Existing variables (defined in other files -- should all contain the "extern"
+ * keyword) */
 extern volatile u32 G_u32SystemTime1ms;    /*!< @brief From main.c */
 extern volatile u32 G_u32SystemTime1s;     /*!< @brief From main.c */
 extern volatile u32 G_u32SystemFlags;      /*!< @brief From main.c */
@@ -117,8 +121,8 @@ void UserApp1Initialize(void) {
 
 @brief Selects and runs one iteration of the current state in the state machine.
 
-All state machines have a TOTAL of 1ms to execute, so on average n state machines
-may take 1ms / n to execute.
+All state machines have a TOTAL of 1ms to execute, so on average n state
+machines may take 1ms / n to execute.
 
 Requires:
 - State machine function pointer points at current state
@@ -231,5 +235,5 @@ static void UserApp1SM_Idle(void) {
 static void UserApp1SM_Error(void) {} /* end UserApp1SM_Error() */
 
 /*--------------------------------------------------------------------------------------------------------------------*/
-/* End of File                                                                                                        */
+/* End of File */
 /*--------------------------------------------------------------------------------------------------------------------*/

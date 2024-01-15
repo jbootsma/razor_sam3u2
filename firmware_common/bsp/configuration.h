@@ -88,6 +88,7 @@ Includes
 #include "sam3u_spi.h"
 #include "sam3u_ssp.h"
 #include "sam3u_uart.h"
+#include "sam3u_usb.h"
 #include "adc12.h"
 
 /* Common application header files */
