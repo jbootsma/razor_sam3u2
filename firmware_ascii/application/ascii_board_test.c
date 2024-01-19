@@ -414,8 +414,8 @@ void BoardTestSM_Idle(void)
   if(IsTimeUp(&u32LcdTimer, 200))
   {
     u32LcdTimer = G_u32SystemTime1ms;
-    au8Temp1[20] = NULL;
-    au8Temp2[20] = NULL;
+    au8Temp1[20] = 0;
+    au8Temp2[20] = 0;
     u8Index = u8ResetIndex;
     for(u8 i = 0; i < 20; i++)
     { 
