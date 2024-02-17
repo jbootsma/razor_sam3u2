@@ -1,3 +1,4 @@
+// clang-format off
 /*!*********************************************************************************************************************
 @file configuration.h
 @brief Main configuration header file for project.
@@ -89,6 +90,7 @@ Includes
 #include "sam3u_ssp.h"
 #include "sam3u_uart.h"
 #include "sam3u_usb.h"
+#include "usb_utils.h"
 #include "adc12.h"
 
 /* Common application header files */
