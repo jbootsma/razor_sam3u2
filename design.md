@@ -55,7 +55,7 @@ Other Notes:
         - Changes to effective volume/mute should happen at 0-crossings.
      3. Write samples to USB endpoint.
 
-## USB Audio Driver
+### USB Audio Driver
 
 - Details on what Windows supports [here](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/usb-2-0-audio-drivers)
 
@@ -99,3 +99,16 @@ Other Notes:
   - Alternate settings for different bandwidths.
   - If bandwidth is exceeded, switch to 0 and report through control-interface interrupt.
   - (Maybe just provide a single setting that supports max sample rate to be easy).
+
+## Implementation tasks
+
+- [X] Program skeleton
+- [ ] usb_audio_utils.h defines from spec.
+- [ ] Output silence, fixed frequency (44100 KHz), no volume control
+- [ ] Fixed rate triangle wave (441 Hz).
+- [ ] Volume + Mute
+- [ ] Sample rate control
+- [ ] Loopback input + Source selection
+- [ ] Volume visualization
+- [ ] ADC input
+  - [ ] Pre-amp volume control?

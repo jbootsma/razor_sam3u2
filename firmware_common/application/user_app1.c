@@ -65,11 +65,6 @@ Variable names shall start with "UserApp1_<type>" and be declared as static.
 static fnCode_type UserApp1_pfStateMachine; /*!< @brief The state machine function pointer */
 // static u32 UserApp1_u32Timeout;                           /*!< @brief Timeout counter used across states */
 
-#define U16_SAMPLE_BUF_SIZE 256
-
-static u16 UserApp1_au16Samples[U16_SAMPLE_BUF_SIZE];
-static u16 UserApp1_au16SampleRate = 100;
-
 /**********************************************************************************************************************
 Function Definitions
 **********************************************************************************************************************/
@@ -98,13 +93,17 @@ Promises:
 
 */
 void UserApp1Initialize(void) {
-  LedPWM(LCD_BLUE, LED_PWM_100);
-  LedPWM(LCD_GREEN, LED_PWM_0);
-  LedOff(LCD_RED);
+  for (u8 led = 0; led < U8_TOTAL_LEDS; led++) {
+    LedOff(led);
+  }
+  LedOn(LCD_RED);
+  LedOn(LCD_GREEN);
+  LedOn(LCD_BLUE);
 
-  LcdClearChars(LINE1_START_ADDR, U8_LCD_MAX_MESSAGE_SIZE);
-  LcdClearChars(LINE2_START_ADDR, U8_LCD_MAX_MESSAGE_SIZE);
   LcdCommand(LCD_DISPLAY_CMD | LCD_DISPLAY_ON);
+  LcdCommand(LCD_HOME_CMD);
+  LcdCommand(LCD_CLEAR_CMD);
+  LcdMessage(LINE1_START_ADDR, "Audio Demo");
 
   /* If good initialization, set state to Idle */
   if (1) {
@@ -137,98 +136,12 @@ void UserApp1RunActiveState(void) { UserApp1_pfStateMachine(); } /* end UserApp1
 /*! @privatesection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
-static u8 LcdNumMessage(u8 u8Addr, u32 u32Num) {
-  char line[11];
-  line[10] = '\0';
-
-  u32 idx = 9;
-  line[idx] = '0';
-
-  while (u32Num != 0) {
-    line[idx--] = '0' + u32Num % 10;
-    u32Num /= 10;
-  }
-
-  // Always show at least one character.
-  if (idx != 9) {
-    idx += 1;
-  }
-
-  LcdMessage(u8Addr, &line[idx]);
-  return 10 - idx;
-}
-
 /**********************************************************************************************************************
 State Machine Function Definitions
 **********************************************************************************************************************/
 /*-------------------------------------------------------------------------------------------------------------------*/
 /* What does this state do? */
-static void UserApp1SM_Idle(void) {
-  static u8 u8DisplayedPct = 255;
-  static u32 u32SamplesThisSecond = 0;
-  static u16 u16SecondCounter = 1000;
-  static u8 u8FrameCounter = 100;
-  static u16 u16LastSample = 0;
-
-  if (Adc12IsIdle()) {
-    Adc12StartContinuousSampling(ADC12_POTENTIOMETER, UserApp1_au16SampleRate, UserApp1_au16Samples,
-                                 U16_SAMPLE_BUF_SIZE);
-  } else {
-    if (Adc12CheckOverrun()) {
-      LedOn(YELLOW);
-    } else {
-      LedOff(YELLOW);
-    }
-  }
-
-  if (WasButtonPressed(BUTTON1)) {
-    ButtonAcknowledge(BUTTON1);
-    Adc12StopContinuousSampling();
-    UserApp1_au16SampleRate *= 1.1;
-  } else if (WasButtonPressed(BUTTON0)) {
-    ButtonAcknowledge(BUTTON0);
-    Adc12StopContinuousSampling();
-    UserApp1_au16SampleRate *= 0.9;
-  }
-
-  u16 au16Samples[128];
-  u16 u16SampleCount = Adc12GetSamples(au16Samples, 128);
-
-  if (u16SampleCount != 0) {
-    u32SamplesThisSecond += u16SampleCount;
-    u16LastSample = au16Samples[u16SampleCount - 1];
-  }
-
-  if (--u8FrameCounter == 0) {
-    u8FrameCounter = 100;
-    u32 u32Sample = u16LastSample;               // Use 32 bits to avoid overflow during multiplication.
-    u32Sample = (u32Sample * 100 + 2048) / 4096; // Convert to %
-
-    if (u32Sample != u8DisplayedPct) {
-      u8DisplayedPct = u32Sample;
-      LcdClearChars(LINE1_START_ADDR, U8_LCD_MAX_LINE_DISPLAY_SIZE);
-      LcdNumMessage(LINE1_START_ADDR, u8DisplayedPct);
-    }
-
-    u32Sample = (u32Sample + 2) / 5; // Convert to PWM level.
-
-    LedPWM(LCD_BLUE, LED_PWM_100 - u32Sample);
-    LedPWM(LCD_GREEN, LED_PWM_0 + u32Sample);
-  }
-
-  if (--u16SecondCounter == 0) {
-    u16SecondCounter = 1000;
-
-    LcdClearChars(LINE2_START_ADDR, U8_LCD_MAX_LINE_DISPLAY_SIZE);
-
-    u8 numSz = LcdNumMessage(LINE2_START_ADDR, UserApp1_au16SampleRate);
-
-    LcdNumMessage(LINE2_START_ADDR + numSz + 1, u32SamplesThisSecond);
-    u32SamplesThisSecond = 0;
-
-    Adc12ClearOverrun();
-  }
-} /* end UserApp1SM_Idle() */
+static void UserApp1SM_Idle(void) {} /* end UserApp1SM_Idle() */
 
 /*-------------------------------------------------------------------------------------------------------------------*/
 /* Handle an error */
