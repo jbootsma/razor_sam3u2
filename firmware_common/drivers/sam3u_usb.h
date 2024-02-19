@@ -114,6 +114,7 @@ typedef enum {
   USB_DESC_TYPE_DEV_QUAL = 6,
   USB_DESC_TYPE_OTHER_SPEED_CFG = 7,
   USB_DESC_TYPE_IFACE_PWR = 8,
+  USB_DESC_TYPE_IFACE_ASSOC = 11,
   USB_DESC_TYPE_BOS = 15,
   USB_DESC_TYPE_DEV_CAPABILITY = 16,
 } UsbDescType;
@@ -205,8 +206,7 @@ typedef enum {
  * is written/read.
  * @param pvUserData_ Whatever was passed as user data to UsbAcceptRequest()
  */
-typedef void (*UsbRequestHandlerCb)(
-    const volatile UsbRequestStatusType *stStatus_, void *pvUserData_);
+typedef void (*UsbRequestHandlerCb)(const volatile UsbRequestStatusType *stStatus_, void *pvUserData_);
 
 /**
  * @brief A handler for cleaning up after a request.
@@ -288,10 +288,8 @@ bool UsbSetDriverConfig(const UsbDriverConfigType *pstConfig_);
  * @retval TRUE The driver can support the provided endpoint configuration.
  * @retval FALSE The driver is not able to support the endpoint configuration.
  */
-bool UsbValidateEndpoints(const UsbEndpointConfigType *pstEp0Cfg_,
-                          u8 u8NumExtraEndpoints_,
-                          const UsbEndpointConfigType *astConfigs_,
-                          const char **ppcErrorStrOut_);
+bool UsbValidateEndpoints(const UsbEndpointConfigType *pstEp0Cfg_, u8 u8NumExtraEndpoints_,
+                          const UsbEndpointConfigType *astConfigs_, const char **ppcErrorStrOut_);
 
 /**
  * @brief Configure the active set of endpoints
@@ -308,8 +306,7 @@ bool UsbValidateEndpoints(const UsbEndpointConfigType *pstEp0Cfg_,
  * retains any packet state. If the device is enabled the old and new
  * configuration for the default control endpoint must match.
  */
-bool UsbSetEndpointsConfig(u8 u8NumExtraEndpoints_,
-                           const UsbEndpointConfigType *astConfigs_);
+bool UsbSetEndpointsConfig(u8 u8NumExtraEndpoints_, const UsbEndpointConfigType *astConfigs_);
 
 /**
  * @brief Change the enabled state of the USB peripheral.
@@ -462,8 +459,7 @@ const UsbSetupPacketType *UsbGetCurrentRequest(void);
  * @return TRUE if there was a pending request and it has been succesfully
  * accepted. FALSE otherwise.
  */
-bool UsbAcceptRequest(UsbRequestHandlerCb fnRequestHandler_,
-                      UsbRequestCleanupCb fnRequestCleanup_, void *pvUserData_);
+bool UsbAcceptRequest(UsbRequestHandlerCb fnRequestHandler_, UsbRequestCleanupCb fnRequestCleanup_, void *pvUserData_);
 
 /**
  * @brief Fail the active request.

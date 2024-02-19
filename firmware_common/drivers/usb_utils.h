@@ -27,47 +27,34 @@ static const UsbADescType stADesc = {
 };
 */
 
-#define USB_DEV_DESC_HEADER                                                    \
-  (UsbDescHeaderType) {                                                        \
-    .u8Length = sizeof(UsbDevDescType), .eType = USB_DESC_TYPE_DEV,            \
-  }
+#define USB_DEV_DESC_HEADER                                                                                            \
+  (UsbDescHeaderType) { .u8Length = sizeof(UsbDevDescType), .eType = USB_DESC_TYPE_DEV, }
 
-#define USB_DEV_QUAL_DESC_HEADER                                               \
-  (UsbDescHeaderType) {                                                        \
-    .u8Length = sizeof(UsbDevQualDescType), .eType = USB_DESC_TYPE_DEV_QUAL,   \
-  }
+#define USB_DEV_QUAL_DESC_HEADER                                                                                       \
+  (UsbDescHeaderType) { .u8Length = sizeof(UsbDevQualDescType), .eType = USB_DESC_TYPE_DEV_QUAL, }
 
-#define USB_CFG_DESC_HEADER                                                    \
-  (UsbDescHeaderType) {                                                        \
-    .u8Length = sizeof(UsbCfgDescType), .eType = USB_DESC_TYPE_CFG,            \
-  }
+#define USB_CFG_DESC_HEADER                                                                                            \
+  (UsbDescHeaderType) { .u8Length = sizeof(UsbCfgDescType), .eType = USB_DESC_TYPE_CFG, }
 
-#define USB_OTHER_SPEED_CFG_DESC_HEADER                                        \
-  (UsbDescHeaderType) {                                                        \
-    .u8Length = sizeof(UsbCfgDescType),                                        \
-    .eType = USB_DESC_TYPE_OTHER_SPEED_CFG,                                    \
-  }
+#define USB_OTHER_SPEED_CFG_DESC_HEADER                                                                                \
+  (UsbDescHeaderType) { .u8Length = sizeof(UsbCfgDescType), .eType = USB_DESC_TYPE_OTHER_SPEED_CFG, }
 
-#define USB_IFACE_DESC_HEADER                                                  \
-  (UsbDescHeaderType) {                                                        \
-    .u8Length = sizeof(UsbIfaceDescType), .eType = USB_DESC_TYPE_IFACE,        \
-  }
+#define USB_IFACE_DESC_HEADER                                                                                          \
+  (UsbDescHeaderType) { .u8Length = sizeof(UsbIfaceDescType), .eType = USB_DESC_TYPE_IFACE, }
 
-#define USB_EPT_DESC_HEADER                                                    \
-  (UsbDescHeaderType) {                                                        \
-    .u8Length = sizeof(UsbEptDescType), .eType = USB_DESC_TYPE_EPT,            \
-  }
+#define USB_EPT_DESC_HEADER                                                                                            \
+  (UsbDescHeaderType) { .u8Length = sizeof(UsbEptDescType), .eType = USB_DESC_TYPE_EPT, }
 
-#define USB_BOS_DESC_HEADER                                                    \
-  (UsbDescHeaderType) {                                                        \
-    .u8Length = sizeof(UsbBosDescType), .eType = USB_DESC_TYPE_BOS,            \
-  }
+#define USB_IFACE_ASSOC_DESC_HEADER                                                                                    \
+  (UsbDescHeaderType) { .u8Length = sizeof(UsbIfaceAssocDescType), .eType = USB_DESC_TYPE_IFACE_ASSOC, }
 
-#define USB_DEV_CAP_200_EXT_HEADER                                             \
-  (UsbDevCapHeaderType) {                                                      \
-    .stDescHeader = {.u8Length = sizeof(UsbDevCap200ExtType),                  \
-                     .eType = USB_DESC_TYPE_DEV_CAPABILITY},                   \
-    .eCap = USB_DEV_CAP_200_EXT,                                               \
+#define USB_BOS_DESC_HEADER                                                                                            \
+  (UsbDescHeaderType) { .u8Length = sizeof(UsbBosDescType), .eType = USB_DESC_TYPE_BOS, }
+
+#define USB_DEV_CAP_200_EXT_HEADER                                                                                     \
+  (UsbDevCapHeaderType) {                                                                                              \
+    .stDescHeader = {.u8Length = sizeof(UsbDevCap200ExtType), .eType = USB_DESC_TYPE_DEV_CAPABILITY},                  \
+    .eCap = USB_DEV_CAP_200_EXT,                                                                                       \
   }
 
 //------------------------------------------------------------------------------
@@ -166,6 +153,14 @@ typedef struct __attribute__((packed)) {
   u8 u8Interval;
 } UsbEptDescType;
 
+typedef struct __attribute__((packed)) {
+  UsbDescHeaderType stHeader;
+  u8 u8FirstInterface;
+  u8 u8InterfaceCount;
+  UsbClassType stFunctionClass;
+  u8 u8FunctionStr;
+} UsbIfaceAssocDescType;
+
 /**
  * @brief A list of discriptors. Use MAKE_USB_DESC_LIST to easily create one.
  *
@@ -181,11 +176,10 @@ typedef struct {
  * Easily define the contents of UsbDescListType. Each argument to this macro
  * should be a pointer to a descriptor that is included in the list.
  */
-#define MAKE_USB_DESC_LIST(...)                                                \
-  (UsbDescListType) {                                                          \
-    .u8NumDescs =                                                              \
-        sizeof((const void *[]){__VA_ARGS__}) / sizeof(const void *),          \
-    .apvDescs = (const void *[]){__VA_ARGS__},                                 \
+#define MAKE_USB_DESC_LIST(...)                                                                                        \
+  (UsbDescListType) {                                                                                                  \
+    .u8NumDescs = sizeof((const void *[]){__VA_ARGS__}) / sizeof(const void *),                                        \
+    .apvDescs = (const void *[]){__VA_ARGS__},                                                                         \
   }
 
 // BOS descriptors are based on USB 3.2 spec rev 1.1. They were initially
@@ -211,7 +205,7 @@ typedef struct __attribute__((packed)) {
 
 typedef struct __attribute__((packed)) {
   UsbDevCapHeaderType stCapHeader;
-  struct {
+  struct __attribute__((packed)) {
     int _reserved : 1;
     bool bLpmSupported : 1;
     int _reserved2 : 6;
@@ -248,27 +242,25 @@ typedef struct __attribute__((packed)) {
 // Declare a MS platform capability descriptor. The extra arguments are the
 // initializers for each UsbMsDescSetInfoType that will be included in the full
 // descriptor.
-#define DECL_USB_MS_PLAT_CAPABILITY(name, ...)                                 \
-  struct __attribute__((packed)) {                                             \
-    UsbPlatformDescHeaderType stHeader;                                        \
-    UsbMsDescSetInfoType                                                       \
-        astDescSets[sizeof(UsbMsDescSetInfoType[]){__VA_ARGS__} /              \
-                    sizeof(UsbMsDescSetInfoType)];                             \
-  } name = {                                                                   \
-      .stHeader =                                                              \
-          {                                                                    \
-              .stCapHeader =                                                   \
-                  {                                                            \
-                      .stDescHeader =                                          \
-                          {                                                    \
-                              .u8Length = sizeof(name),                        \
-                              .eType = USB_DESC_TYPE_DEV_CAPABILITY,           \
-                          },                                                   \
-                      .eCap = USB_DEV_CAP_PLATFORM,                            \
-                  },                                                           \
-              .au8Uuid = USB_MS_PLAT_CAPABILITY_UUID,                          \
-          },                                                                   \
-      .astDescSets = {__VA_ARGS__},                                            \
+#define DECL_USB_MS_PLAT_CAPABILITY(name, ...)                                                                         \
+  struct __attribute__((packed)) {                                                                                     \
+    UsbPlatformDescHeaderType stHeader;                                                                                \
+    UsbMsDescSetInfoType astDescSets[sizeof(UsbMsDescSetInfoType[]){__VA_ARGS__} / sizeof(UsbMsDescSetInfoType)];      \
+  } name = {                                                                                                           \
+      .stHeader =                                                                                                      \
+          {                                                                                                            \
+              .stCapHeader =                                                                                           \
+                  {                                                                                                    \
+                      .stDescHeader =                                                                                  \
+                          {                                                                                            \
+                              .u8Length = sizeof(name),                                                                \
+                              .eType = USB_DESC_TYPE_DEV_CAPABILITY,                                                   \
+                          },                                                                                           \
+                      .eCap = USB_DEV_CAP_PLATFORM,                                                                    \
+                  },                                                                                                   \
+              .au8Uuid = USB_MS_PLAT_CAPABILITY_UUID,                                                                  \
+          },                                                                                                           \
+      .astDescSets = {__VA_ARGS__},                                                                                    \
   }
 
 typedef enum {
@@ -302,10 +294,9 @@ typedef struct __attribute__((packed)) {
   u16 u16TotalLength;
 } UsbMsOs20DescSetHeaderType;
 
-#define USB_MS_OS_20_SET_HEADER_DESCRIPTOR_HEADER                              \
-  (UsbMsOs20DescHeaderType) {                                                  \
-    .u16Length = sizeof(UsbMsOs20DescSetHeaderType),                           \
-    .eType = USB_MS_OS_20_SET_HEADER_DESCRIPTOR,                               \
+#define USB_MS_OS_20_SET_HEADER_DESCRIPTOR_HEADER                                                                      \
+  (UsbMsOs20DescHeaderType) {                                                                                          \
+    .u16Length = sizeof(UsbMsOs20DescSetHeaderType), .eType = USB_MS_OS_20_SET_HEADER_DESCRIPTOR,                      \
   }
 
 typedef struct __attribute__((packed)) {
@@ -315,10 +306,9 @@ typedef struct __attribute__((packed)) {
   u16 u16SubsetLength;
 } UsbMsOs20ConfigSubsetHeaderType;
 
-#define USB_MS_OS_20_SUBSET_HEADER_CONFIGURATION_HEADER                        \
-  (UsbMsOs20DescHeaderType) {                                                  \
-    .u16Length = sizeof(UsbMsOs20ConfigSubsetHeaderType),                      \
-    .eType = USB_MS_OS_20_SUBSET_HEADER_CONFIGURATION,                         \
+#define USB_MS_OS_20_SUBSET_HEADER_CONFIGURATION_HEADER                                                                \
+  (UsbMsOs20DescHeaderType) {                                                                                          \
+    .u16Length = sizeof(UsbMsOs20ConfigSubsetHeaderType), .eType = USB_MS_OS_20_SUBSET_HEADER_CONFIGURATION,           \
   }
 
 typedef struct __attribute__((packed)) {
@@ -328,10 +318,9 @@ typedef struct __attribute__((packed)) {
   u16 u16SubsetLength;
 } UsbMsOs20FunctionSubsetHeaderType;
 
-#define USB_MS_OS_20_SUBSET_HEADER_FUNCTION_HEADER                             \
-  (UsbMsOs20DescHeaderType) {                                                  \
-    .u16Length = sizeof(UsbMsOs20FunctionSubsetHeaderType),                    \
-    .eType = USB_MS_OS_20_SUBSET_HEADER_FUNCTION,                              \
+#define USB_MS_OS_20_SUBSET_HEADER_FUNCTION_HEADER                                                                     \
+  (UsbMsOs20DescHeaderType) {                                                                                          \
+    .u16Length = sizeof(UsbMsOs20FunctionSubsetHeaderType), .eType = USB_MS_OS_20_SUBSET_HEADER_FUNCTION,              \
   }
 
 typedef struct __attribute__((packed)) {
@@ -340,10 +329,9 @@ typedef struct __attribute__((packed)) {
   char stSubCompatId[8];
 } UsbMsOs20CompatitbleIdType;
 
-#define USB_MS_OS_20_FEATURE_COMPATBLE_ID_HEADER                               \
-  (UsbMsOs20DescHeaderType) {                                                  \
-    .u16Length = sizeof(UsbMsOs20CompatitbleIdType),                           \
-    .eType = USB_MS_OS_20_FEATURE_COMPATBLE_ID,                                \
+#define USB_MS_OS_20_FEATURE_COMPATBLE_ID_HEADER                                                                       \
+  (UsbMsOs20DescHeaderType) {                                                                                          \
+    .u16Length = sizeof(UsbMsOs20CompatitbleIdType), .eType = USB_MS_OS_20_FEATURE_COMPATBLE_ID,                       \
   }
 
 // TODO other MS OS 2.0 feature descriptors.
@@ -358,11 +346,10 @@ typedef struct {
   const void **apvDescs;
 } UsbMsOs20DescListType;
 
-#define MAKE_USB_MS_OS_20_DESC_LIST(...)                                       \
-  (UsbMsOs20DescListType) {                                                    \
-    .u8NumDescs =                                                              \
-        sizeof((const void *[]){__VA_ARGS__}) / sizeof(const void *),          \
-    .apvDescs = (const void *[]){__VA_ARGS__},                                 \
+#define MAKE_USB_MS_OS_20_DESC_LIST(...)                                                                               \
+  (UsbMsOs20DescListType) {                                                                                            \
+    .u8NumDescs = sizeof((const void *[]){__VA_ARGS__}) / sizeof(const void *),                                        \
+    .apvDescs = (const void *[]){__VA_ARGS__},                                                                         \
   }
 
 //------------------------------------------------------------------------------
@@ -394,8 +381,8 @@ typedef struct {
  * should be called again on the next callback with the same arguments to finish
  * writing the chunk.
  */
-bool UsbWriteChunk(const volatile UsbRequestStatusType *pstStatus_,
-                   u16 u16ChunkStart_, const void *pvData_, u16 u16DataLen_);
+bool UsbWriteChunk(const volatile UsbRequestStatusType *pstStatus_, u16 u16ChunkStart_, const void *pvData_,
+                   u16 u16DataLen_);
 
 /**
  * @brief Helper utility to send an array of data as a response to a request.
@@ -405,8 +392,7 @@ bool UsbWriteChunk(const volatile UsbRequestStatusType *pstStatus_,
  * offset, and will automatically end the request when the full array is
  * written.
  */
-void UsbWriteArray(const volatile UsbRequestStatusType *pstStatus_,
-                   const void *pvData_, u16 u16DataLen_);
+void UsbWriteArray(const volatile UsbRequestStatusType *pstStatus_, const void *pvData_, u16 u16DataLen_);
 
 /**
  * Callback for use with UsbAcceptRequest when the response is a single USB
@@ -415,8 +401,7 @@ void UsbWriteArray(const volatile UsbRequestStatusType *pstStatus_,
  * @param pvDesc_ should be a pointer to the descriptor to be sent as the
  * response.
  */
-void UsbSendDesc(const volatile UsbRequestStatusType *pstStatus_,
-                 void *pvDesc_);
+void UsbSendDesc(const volatile UsbRequestStatusType *pstStatus_, void *pvDesc_);
 
 /// @brief Calculate the total length in bytes of the provided list of
 /// descriptors.
@@ -429,8 +414,7 @@ u16 UsbDescListByteLen(UsbDescListType stDescs_);
  * @param pvList_ A pointer to UsbDescListType indicating which descriptors to
  * send in the response.
  */
-void UsbSendDescList(const volatile UsbRequestStatusType *pstStatus_,
-                     void *pvList_);
+void UsbSendDescList(const volatile UsbRequestStatusType *pstStatus_, void *pvList_);
 
 /**
  * Dynamically allocate a descriptor describing a list of string IDs.
@@ -471,7 +455,6 @@ u16 UsbMsOs20DescListByteLen(UsbMsOs20DescListType stList_);
  * @param pvDescList_ A pointer to UsbMsOs20DescListType indicating the
  * descriptors to include in the response.
  */
-void UsbSendMsOs20DescSet(const volatile UsbRequestStatusType *pstStatus_,
-                          void *pvDescList_);
+void UsbSendMsOs20DescSet(const volatile UsbRequestStatusType *pstStatus_, void *pvDescList_);
 
 #endif
