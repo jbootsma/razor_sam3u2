@@ -21,7 +21,7 @@ Bonus features if time/resources:
 
 Other Notes:
 
-- Cap sample rate to 48 KHz. Internal buffers can then be sized to 50 bytes. (Maybe 52 to align to word-boundary).
+- Cap sample rate to 48 KHz. Internal buffers can then be sized to 50 Samples.
 - Internal audio format is normalized 16-bit signed integer.
 - Do everything mono initially. Stereo support could be a bonus feature if there's enough processing power.
 - Not dropping a frame is pretty important. Add some additional timing capture to main loop to get an idea of how much processing is actually being used.
@@ -103,8 +103,8 @@ Other Notes:
 ## Implementation tasks
 
 - [X] Program skeleton
-- [ ] usb_audio_utils.h defines from spec.
-- [ ] Output silence, fixed frequency (44100 KHz), no volume control
+- [X] usb_audio_utils.h defines from spec.
+- [X] Output silence, fixed frequency (44100 KHz), no volume control
 - [ ] Fixed rate triangle wave (441 Hz).
 - [ ] Volume + Mute
 - [ ] Sample rate control

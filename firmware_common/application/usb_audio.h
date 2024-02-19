@@ -508,7 +508,7 @@ typedef struct __attribute__((packed)) {
   } stControls;
   u8 u8AssocTerminal;
   u8 u8NameStr;
-} UsbAudioCtrlClkSrcDescType;
+} UsbAudioClkSrcDescType;
 
 #define USB_AUDIO_CLK_SEL_DESC_TYPE(N)                                                                                 \
   struct __attribute__((packed)) {                                                                                     \
@@ -850,11 +850,11 @@ typedef struct __attribute__((packed)) {
     } stTypeIV;
   } uFormats;
   UsbAudioChannelClusterDesc stChannels;
-} UsbAudioStrIfaceDescType;
+} UsbAudioStreamIfaceDescType;
 
 typedef struct __attribute__((packed)) {
   UsbAudioDescHeaderType stHeader;
-  u8 u8FormatType;
+  UsbAudioFormatCatType eFormatType : 8;
   u8 u8SubslotSize;
   u8 u8BitResolution;
 } UsbAudioTypeIFormatDescType;
@@ -879,7 +879,7 @@ typedef struct __attribute__((packed)) {
 // Constants
 //------------------------------------------------------------------------------
 
-#define USB_CLASS_AUDIO 0x01
+#define USB_BASE_CLASS_AUDIO 0x01
 
 #define USB_SUBCLASS_AUDIO_UNDEF 0x00
 #define USB_SUBCLASS_AUDIO_CONTROL 0x01
@@ -889,7 +889,55 @@ typedef struct __attribute__((packed)) {
 #define USB_PROTO_AUDIO_UNDEF 0x00
 #define USB_PROTO_AUDIO_VERSION_02_00 0x20
 
-#define USB_AUDIO_CLASS_CTRL                                                                                           \
-  (UsbClassType) { USB_CLASS_AUDIO, USB_SUBCLASS_AUDIO_CONTROL, USB_PROTO_AUDIO_VERSION_02_00 }
+#define USB_AUDIO_FUNC_CLASS                                                                                           \
+  (UsbClassType) { USB_BASE_CLASS_AUDIO, USB_SUBCLASS_AUDIO_UNDEF, USB_PROTO_AUDIO_VERSION_02_00 }
+
+#define USB_AUDIO_CTRL_CLASS                                                                                           \
+  (UsbClassType) { USB_BASE_CLASS_AUDIO, USB_SUBCLASS_AUDIO_CONTROL, USB_PROTO_AUDIO_VERSION_02_00 }
+
+#define USB_AUDIO_STREAM_CLASS                                                                                         \
+  (UsbClassType) { USB_BASE_CLASS_AUDIO, USB_SUBCLASS_AUDIO_STREAMING, USB_PROTO_AUDIO_VERSION_02_00 }
+
+#define USB_AUDIO_CTRL_HEADER_DESC_HEADER                                                                              \
+  (UsbAudioDescHeaderType) {                                                                                           \
+    .stUsbHeader = {.u8Length = sizeof(UsbAudioCtrlHeaderDescType), .eType = USB_AUDIO_CS_IFACE},                      \
+    .eSubtype = USB_AUDIO_AC_DESC_HEADER                                                                               \
+  }
+
+#define USB_AUDIO_CLK_SRC_DESC_HEADER                                                                                  \
+  (UsbAudioDescHeaderType) {                                                                                           \
+    .stUsbHeader = {.u8Length = sizeof(UsbAudioClkSrcDescType), .eType = USB_AUDIO_CS_IFACE},                          \
+    .eSubtype = USB_AUDIO_AC_DESC_CLOCK_SOURCE                                                                         \
+  }
+
+#define USB_AUDIO_IN_TERM_DESC_HEADER                                                                                  \
+  (UsbAudioDescHeaderType) {                                                                                           \
+    .stUsbHeader = {.u8Length = sizeof(UsbAudioInTermDescType), .eType = USB_AUDIO_CS_IFACE},                          \
+    .eSubtype = USB_AUDIO_AC_DESC_INPUT_TERM                                                                           \
+  }
+
+#define USB_AUDIO_OUT_TERM_DESC_HEADER                                                                                 \
+  (UsbAudioDescHeaderType) {                                                                                           \
+    .stUsbHeader = {.u8Length = sizeof(UsbAudioOutTermDescType), .eType = USB_AUDIO_CS_IFACE},                         \
+    .eSubtype = USB_AUDIO_AC_DESC_OUTPUT_TERM                                                                          \
+  }
+
+#define USB_AUDIO_STREAM_IFACE_DESC_HEADER                                                                             \
+  (UsbAudioDescHeaderType) {                                                                                           \
+    .stUsbHeader = {.u8Length = sizeof(UsbAudioStreamIfaceDescType), .eType = USB_AUDIO_CS_IFACE},                     \
+    .eSubtype = USB_AUDIO_AI_DESC_GENERAL                                                                              \
+  }
+
+#define USB_AUDIO_FMT_TYPE_I_DESC_HEADER                                                                               \
+  (UsbAudioDescHeaderType) {                                                                                           \
+    .stUsbHeader = {.u8Length = sizeof(UsbAudioTypeIFormatDescType), .eType = USB_AUDIO_CS_IFACE},                     \
+    .eSubtype = USB_AUDIO_AI_DESC_FORMAT_TYPE                                                                          \
+  }
+
+#define USB_AUDIO_ISO_EPT_DESC_HEADER                                                                                  \
+  (UsbAudioDescHeaderType) {                                                                                           \
+    .stUsbHeader = {.u8Length = sizeof(UsbAudioIsoEptDescType), .eType = USB_AUDIO_CS_EPT},                            \
+    .eSubtype = USB_AUDIO_AEP_DESC_GENERAL                                                                             \
+  }
 
 #endif /* USB_AUDIO_H */

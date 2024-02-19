@@ -9,6 +9,13 @@
 // Constants
 //------------------------------------------------------------------------------
 
+#define USB_BASE_CLASS_MISC 0xEF
+#define USB_SUBCLASS_IAD 0x02
+#define USB_PROTO_IAD 0x01
+
+#define USB_CLASS_IAD                                                                                                  \
+  (UsbClassType) { USB_BASE_CLASS_MISC, USB_SUBCLASS_IAD, USB_PROTO_IAD }
+
 /// Class code for vendor specific interfaces.
 #define USB_CLASS_VENDOR_SPECIFIC 0xFF
 
@@ -149,7 +156,11 @@ typedef struct __attribute__((packed)) {
     UsbEptUsageType eUsage : 2;
     u8 _reserved : 2;
   } stAttrib;
-  u16 u16MaxPktSize;
+  struct __attribute__((packed)) {
+    u16 u11PacketSize : 11;
+    u8 u2ExtraPacketsPerFrame : 2;
+    int _reserved : 3;
+  } stMaxPacketSize;
   u8 u8Interval;
 } UsbEptDescType;
 
