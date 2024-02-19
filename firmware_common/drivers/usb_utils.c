@@ -15,8 +15,8 @@
 //         Public Function Impls
 //------------------------------------------------------------------------------
 
-bool UsbWriteChunk(const volatile UsbRequestStatusType *pstStatus_,
-                   u16 u16ChunksStart_, const void *pvData_, u16 u16DataLen_) {
+bool UsbWriteChunk(const volatile UsbRequestStatusType *pstStatus_, u16 u16ChunksStart_, const void *pvData_,
+                   u16 u16DataLen_) {
   if (pstStatus_->u16RequestOffset == pstStatus_->stHeader.u16Length) {
     return TRUE;
   }
@@ -33,6 +33,7 @@ bool UsbWriteChunk(const volatile UsbRequestStatusType *pstStatus_,
   }
 
   u16DataLen_ -= u16ChunkOffset;
+  pvData_ = (u8 *)pvData_ + u16ChunkOffset;
   u16 u16Remain = pstStatus_->stHeader.u16Length - pstStatus_->u16RequestOffset;
 
   if (u16Remain < u16DataLen_) {
@@ -47,15 +48,13 @@ bool UsbWriteChunk(const volatile UsbRequestStatusType *pstStatus_,
   }
 }
 
-void UsbWriteArray(const volatile UsbRequestStatusType *pstStatus_,
-                   const void *pvData_, u16 u16DataLen_) {
+void UsbWriteArray(const volatile UsbRequestStatusType *pstStatus_, const void *pvData_, u16 u16DataLen_) {
   if (UsbWriteChunk(pstStatus_, 0, pvData_, u16DataLen_)) {
     UsbNextPacket(USB_DEF_CTRL_EP);
   }
 }
 
-void UsbSendDesc(const volatile UsbRequestStatusType *pstStatus_,
-                 void *pvDesc_) {
+void UsbSendDesc(const volatile UsbRequestStatusType *pstStatus_, void *pvDesc_) {
   const UsbDescHeaderType *pstDesc = pvDesc_;
   UsbWriteArray(pstStatus_, pstDesc, pstDesc->u8Length);
 }
@@ -71,16 +70,14 @@ u16 UsbDescListByteLen(UsbDescListType stDescs_) {
   return u16Len;
 }
 
-void UsbSendDescList(const volatile UsbRequestStatusType *pstStatus_,
-                     void *pvList_) {
+void UsbSendDescList(const volatile UsbRequestStatusType *pstStatus_, void *pvList_) {
   const UsbDescListType *pstList = pvList_;
   u16 u16DescStart_ = 0;
 
   for (u8 u8Idx = 0; u8Idx < pstList->u8NumDescs; u8Idx++) {
     const UsbDescHeaderType *pstHeader = pstList->apvDescs[u8Idx];
 
-    if (!UsbWriteChunk(pstStatus_, u16DescStart_, pstHeader,
-                       pstHeader->u8Length)) {
+    if (!UsbWriteChunk(pstStatus_, u16DescStart_, pstHeader, pstHeader->u8Length)) {
       return;
     }
 
@@ -91,8 +88,7 @@ void UsbSendDescList(const volatile UsbRequestStatusType *pstStatus_,
 }
 
 UsbDescHeaderType *UsbCreateLangIds(u8 u8NumLangs, u16 *au16Langs) {
-  static const u8 u8MaxLangs =
-      (UINT8_MAX - sizeof(UsbDescHeaderType)) / sizeof(u16);
+  static const u8 u8MaxLangs = (UINT8_MAX - sizeof(UsbDescHeaderType)) / sizeof(u16);
 
   if (u8NumLangs > u8MaxLangs) {
     u8NumLangs = u8MaxLangs;
@@ -111,12 +107,10 @@ UsbDescHeaderType *UsbCreateLangIds(u8 u8NumLangs, u16 *au16Langs) {
 }
 
 UsbDescHeaderType *UsbCreateStringDesc(const char *pcStr) {
-  static const u8 u8MaxChars =
-      (UINT8_MAX - sizeof(UsbDescHeaderType)) / sizeof(u16);
+  static const u8 u8MaxChars = (UINT8_MAX - sizeof(UsbDescHeaderType)) / sizeof(u16);
 
   u8 u8NumChars = 0;
-  for (const char *pcTmp = pcStr; *pcTmp != '\0' && u8NumChars < u8MaxChars;
-       pcTmp++) {
+  for (const char *pcTmp = pcStr; *pcTmp != '\0' && u8NumChars < u8MaxChars; pcTmp++) {
     if (*pcTmp & 0x80) {
       // TODO: Full utf8 support.
       return NULL;
@@ -158,16 +152,14 @@ u16 UsbMsOs20DescListByteLen(UsbMsOs20DescListType stList_) {
   return (u16)u32Len;
 }
 
-void UsbSendMsOs20DescSet(const volatile UsbRequestStatusType *pstStatus_,
-                          void *pvDescList_) {
+void UsbSendMsOs20DescSet(const volatile UsbRequestStatusType *pstStatus_, void *pvDescList_) {
   const UsbMsOs20DescListType *pstList = pvDescList_;
   u16 u16DescStart = 0;
 
   for (u8 u8Idx = 0; u8Idx < pstList->u8NumDescs; u8Idx++) {
     const UsbMsOs20DescHeaderType *pstHeader = pstList->apvDescs[u8Idx];
 
-    if (!UsbWriteChunk(pstStatus_, u16DescStart, pstHeader,
-                       pstHeader->u16Length)) {
+    if (!UsbWriteChunk(pstStatus_, u16DescStart, pstHeader, pstHeader->u16Length)) {
       return;
     }
 
