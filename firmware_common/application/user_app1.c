@@ -216,7 +216,7 @@ enum {
 // Id's for all components in the audio chain.
 enum {
   UNDEF_ID,
-  SILENCE_TERM_ID,
+  FAKE_SRC_TERM_ID,
   OUT_TERM_ID,
   CLK_SRC_ID,
 };
@@ -277,9 +277,9 @@ static const UsbAudioClkSrcDescType stClkSrcDesc = {
     .stControls = {.eClkFreq = USB_AUDIO_CTRL_PROP_READ_ONLY},
 };
 
-static const UsbAudioInTermDescType stSilenceDesc = {
+static const UsbAudioInTermDescType stFakeSourceDesc = {
     .stHeader = USB_AUDIO_IN_TERM_DESC_HEADER,
-    .u8TermId = SILENCE_TERM_ID,
+    .u8TermId = FAKE_SRC_TERM_ID,
     .eTermType = USB_AUDIO_TERM_IN_MIC,
     .u8ClkSrcId = CLK_SRC_ID,
     .stChannels = MONO_CHANNEL_DESC,
@@ -289,12 +289,12 @@ static const UsbAudioOutTermDescType stOutTermDesc = {
     .stHeader = USB_AUDIO_OUT_TERM_DESC_HEADER,
     .u8TermId = OUT_TERM_ID,
     .eTermType = USB_AUDIO_TERM_USB_STREAM,
-    .u8SrcId = SILENCE_TERM_ID,
+    .u8SrcId = FAKE_SRC_TERM_ID,
     .u8ClkSrcId = CLK_SRC_ID,
 };
 
 static const UsbDescListType stAudioCtrlList =
-    MAKE_USB_DESC_LIST(&stAudioCtrlHeaderDesc, &stClkSrcDesc, &stSilenceDesc, &stOutTermDesc);
+    MAKE_USB_DESC_LIST(&stAudioCtrlHeaderDesc, &stClkSrcDesc, &stFakeSourceDesc, &stOutTermDesc);
 
 static const UsbIfaceDescType stAudioUsbOutIfaceDesc_0Bytes = {
     .stHeader = USB_IFACE_DESC_HEADER,
@@ -359,7 +359,7 @@ static const UsbDescListType stMainCfgList =
         &stAudioCtrlDesc,
           &stAudioCtrlHeaderDesc,
             &stClkSrcDesc,
-            &stSilenceDesc,
+            &stFakeSourceDesc,
             &stOutTermDesc,
           &stAudioUsbOutIfaceDesc_0Bytes,
           &stAudioUsbOutIfaceDesc_100Bytes,
@@ -653,19 +653,38 @@ static void OnUsbClassRequest(const UsbSetupPacketType *pstRequest) {
 
 static void SendAudioFrame(void) {
   static u8 u8SampleFrac = 0;
+  static u8 u8SampleIdx = 0;
 
   if (stUsb.u8ActiveCfg != MAIN_CFG || stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_100_BYTES) {
     return;
   }
 
+  // 44.1 Khz == 44 samples per frame, 1 extra every 10th frame.
   u8 u8Len = 44;
   if (++u8SampleFrac == 10) {
     u8SampleFrac = 0;
     u8Len += 1;
   }
 
-  static const s16 as16Zeros[45] = {0};
-  UsbWrite(EPT_AUDIO_OUT, &as16Zeros, u8Len * sizeof(s16));
+  static s16 as16Samples[45];
+  for (u8 u8Idx = 0; u8Idx < u8Len; u8Idx++) {
+    s32 s32SampleVal = u8SampleIdx;
+
+    s32SampleVal -= 49;
+    if (s32SampleVal < 0) {
+      s32SampleVal *= -1;
+    }
+    s32SampleVal -= 25;
+    s32SampleVal *= INT16_MAX;
+    s32SampleVal /= 75;
+    as16Samples[u8Idx] = (s16)s32SampleVal;
+
+    if (++u8SampleIdx == 100) {
+      u8SampleIdx = 0;
+    }
+  }
+
+  UsbWrite(EPT_AUDIO_OUT, as16Samples, u8Len * sizeof(s16));
   UsbNextPacket(EPT_AUDIO_OUT);
 }
 

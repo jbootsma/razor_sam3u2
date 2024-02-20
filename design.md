@@ -105,7 +105,7 @@ Other Notes:
 - [X] Program skeleton
 - [X] usb_audio_utils.h defines from spec.
 - [X] Output silence, fixed frequency (44100 KHz), no volume control
-- [ ] Fixed rate triangle wave (441 Hz).
+- [X] Fixed rate triangle wave (441 Hz).
 - [ ] Volume + Mute
 - [ ] Sample rate control
 - [ ] Loopback input + Source selection
