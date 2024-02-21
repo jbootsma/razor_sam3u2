@@ -68,20 +68,32 @@ static fnCode_type UserApp1_pfStateMachine; /*!< @brief The state machine functi
 /**********************************************************************************************************************
 Private Function Prototypes
 **********************************************************************************************************************/
+#define MAX_SAMPLES 50
+
+typedef struct {
+  u16 u16NumSamples;
+  s16 as16Samples[MAX_SAMPLES];
+} AudioFrame;
 
 static void ReportError(const char *pcMsg_);
 
 static bool InitUsb(void);
+
 static void HandleUsbEvent(UsbEventIdType eEvt_);
 static void OnStandardUsbRequest(const UsbSetupPacketType *pstRequest);
 static void OnDescriptorRequest(const UsbSetupPacketType *pstRequest);
 static void OnUsbStringRequest(const UsbSetupPacketType *pstRequest, u8 u8StrIdx);
 static void OnUsbClassRequest(const UsbSetupPacketType *pstRequest);
-static void OnAudioCtrlRequest(const UsbSetupPacketType *pstRequest);
-static void OnAudioStreamRequest(const UsbSetupPacketType *pstRequest);
-static void OnAudioEptRequest(const UsbSetupPacketType *pstRequest);
 
-static void SendAudioFrame(void);
+static void OnAudioCtrlRequest(const UsbSetupPacketType *pstRequest);
+static void HandleAudioCtrlWrite(const volatile UsbRequestStatusType *pstStatus, void *);
+static void GetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
+static void GetVolumeCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
+static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan);
+
+static bool GetAudioFrame(AudioFrame *pstFrame);
+static void ProcessAudioFrame(AudioFrame *pstFrame);
+static void SendAudioFrame(AudioFrame *pstFrame);
 
 /**********************************************************************************************************************
 Function Definitions
@@ -219,6 +231,7 @@ enum {
   FAKE_SRC_TERM_ID,
   OUT_TERM_ID,
   CLK_SRC_ID,
+  VOLUME_ID,
 };
 
 // Descriptors
@@ -285,16 +298,26 @@ static const UsbAudioInTermDescType stFakeSourceDesc = {
     .stChannels = MONO_CHANNEL_DESC,
 };
 
+static const UsbAudioMonoFeatDescType stVolumeDesc = {
+    .stHeader = USB_AUDIO_MONO_FEAT_DESC_HEADER,
+    .u8UnitId = VOLUME_ID,
+    .u8SrcId = FAKE_SRC_TERM_ID,
+    .astControls = {{
+        .eVolume = USB_AUDIO_CTRL_PROP_HOST_PROG,
+        .eMute = USB_AUDIO_CTRL_PROP_HOST_PROG,
+    }},
+};
+
 static const UsbAudioOutTermDescType stOutTermDesc = {
     .stHeader = USB_AUDIO_OUT_TERM_DESC_HEADER,
     .u8TermId = OUT_TERM_ID,
     .eTermType = USB_AUDIO_TERM_USB_STREAM,
-    .u8SrcId = FAKE_SRC_TERM_ID,
+    .u8SrcId = VOLUME_ID,
     .u8ClkSrcId = CLK_SRC_ID,
 };
 
 static const UsbDescListType stAudioCtrlList =
-    MAKE_USB_DESC_LIST(&stAudioCtrlHeaderDesc, &stClkSrcDesc, &stFakeSourceDesc, &stOutTermDesc);
+    MAKE_USB_DESC_LIST(&stAudioCtrlHeaderDesc, &stClkSrcDesc, &stFakeSourceDesc, &stVolumeDesc, &stOutTermDesc);
 
 static const UsbIfaceDescType stAudioUsbOutIfaceDesc_0Bytes = {
     .stHeader = USB_IFACE_DESC_HEADER,
@@ -360,6 +383,7 @@ static const UsbDescListType stMainCfgList =
           &stAudioCtrlHeaderDesc,
             &stClkSrcDesc,
             &stFakeSourceDesc,
+            &stVolumeDesc,
             &stOutTermDesc,
           &stAudioUsbOutIfaceDesc_0Bytes,
           &stAudioUsbOutIfaceDesc_100Bytes,
@@ -392,6 +416,14 @@ static const UsbEndpointConfigType astMainEpts[] = {{
 struct {
   u8 u8ActiveCfg;
   u8 u8OutAlt;
+
+  // Usb expects volumes in a S8.8 format with special value for -inf.
+  // For fast calculation we want just a straight multiplier. So keep both around.
+  // Conversion is handled when the volume is set over USB.
+  s16 s16VolumeUsb;
+  s16 s16VolumeRaw;
+
+  bool bMuted;
 } stUsb;
 
 /**********************************************************************************************************************
@@ -410,6 +442,10 @@ static bool InitUsb(void) {
 
   stUsb.u8ActiveCfg = NO_CFG;
   stUsb.u8OutAlt = IFACE_AUDIO_OUT_ALT_0_BYTES;
+
+  stUsb.bMuted = TRUE;
+  stUsb.s16VolumeUsb = 0x8000;
+  stUsb.s16VolumeRaw = 0;
 
   bool bOk = UsbSetDriverConfig(&stUsbDriverCfg);
 
@@ -599,51 +635,13 @@ static void OnUsbClassRequest(const UsbSetupPacketType *pstRequest) {
     return;
   }
 
-  // TODO: more flexibility.
-  if (pstRequest->stRequestType.eDir != USB_REQ_DIR_DEV_TO_HOST) {
-    return;
-  }
+  switch (pstRequest->stRequestType.eTgt) {
+  case USB_REQ_TGT_IFACE: {
+    u8 u8Iface = (u8)(pstRequest->u16Index);
+    if (u8Iface == IFACE_AUDIO_CTRL) {
+      OnAudioCtrlRequest(pstRequest);
+    }
 
-  if (pstRequest->stRequestType.eTgt != USB_REQ_TGT_IFACE) {
-    return;
-  }
-
-  u8 u8IFace = (u8)(pstRequest->u16Index);
-  u8 u8Entity = (u8)(pstRequest->u16Index >> 8);
-
-  if (u8IFace != IFACE_AUDIO_CTRL || u8Entity != CLK_SRC_ID) {
-    return;
-  }
-
-  UsbAudioClkSrcCtrlType eCtrl = (UsbAudioClkSrcCtrlType)(u8)(pstRequest->u16Value >> 8);
-  u8 u8Chan = (u8)pstRequest->u16Value;
-
-  if (eCtrl != USB_AUDIO_CLK_SRC_CTRL_SAM_FREQ || u8Chan != 0) {
-    return;
-  }
-
-  switch (pstRequest->u8RequestId) {
-  case USB_AUDIO_REQ_CUR: {
-    static const u32 u32Freq = 44100;
-    UsbWrite(EPT_CTRL, &u32Freq, sizeof(u32Freq));
-    UsbNextPacket(EPT_CTRL);
-  } break;
-
-  case USB_AUDIO_REQ_RANGE: {
-    static const struct __attribute__((packed)) {
-      u16 u16NumRanges;
-      u32 u32Min;
-      u32 u32Max;
-      u32 u32Res;
-    } stRanges = {
-        .u16NumRanges = 1,
-        .u32Min = 44100,
-        .u32Max = 44100,
-        .u32Res = 1,
-    };
-
-    UsbWrite(EPT_CTRL, &stRanges, sizeof(stRanges));
-    UsbNextPacket(EPT_CTRL);
   } break;
 
   default:
@@ -651,40 +649,228 @@ static void OnUsbClassRequest(const UsbSetupPacketType *pstRequest) {
   }
 }
 
-static void SendAudioFrame(void) {
-  static u8 u8SampleFrac = 0;
-  static u8 u8SampleIdx = 0;
-
-  if (stUsb.u8ActiveCfg != MAIN_CFG || stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_100_BYTES) {
+static void OnAudioCtrlRequest(const UsbSetupPacketType *pstRequest) {
+  if (pstRequest->stRequestType.eDir == USB_REQ_DIR_HOST_TO_DEV) {
+    UsbAcceptRequest(HandleAudioCtrlWrite, NULL, NULL);
     return;
   }
 
-  // 44.1 Khz == 44 samples per frame, 1 extra every 10th frame.
-  u8 u8Len = 44;
-  if (++u8SampleFrac == 10) {
-    u8SampleFrac = 0;
-    u8Len += 1;
+  u8 u8Entity = (u8)(pstRequest->u16Index >> 8);
+
+  u8 u8Ctrl = (u8)(pstRequest->u16Value >> 8);
+  u8 u8Chan = (u8)(pstRequest->u16Value);
+  bool bIsRange = FALSE;
+
+  switch (pstRequest->u8RequestId) {
+  case USB_AUDIO_REQ_CUR:
+    break;
+
+  case USB_AUDIO_REQ_RANGE:
+    bIsRange = TRUE;
+    break;
+
+  default:
+    return;
   }
 
-  static s16 as16Samples[45];
-  for (u8 u8Idx = 0; u8Idx < u8Len; u8Idx++) {
-    s32 s32SampleVal = u8SampleIdx;
+  switch (u8Entity) {
+  case CLK_SRC_ID:
+    GetClkSrcCtrl(u8Ctrl, u8Chan, bIsRange);
+    break;
 
-    s32SampleVal -= 49;
-    if (s32SampleVal < 0) {
-      s32SampleVal *= -1;
+  case VOLUME_ID:
+    GetVolumeCtrl(u8Ctrl, u8Chan, bIsRange);
+    break;
+  }
+}
+
+static void HandleAudioCtrlWrite(const volatile UsbRequestStatusType *pstStatus, void *) {
+  const volatile UsbSetupPacketType *pstRequest = &pstStatus->stHeader;
+
+  if (pstRequest->u8RequestId != USB_AUDIO_REQ_CUR) {
+    UsbFailRequest();
+    return;
+  }
+
+  u8 u8Entity = (u8)(pstRequest->u16Index >> 8);
+  u8 u8Ctrl = (u8)(pstRequest->u16Value >> 8);
+  u8 u8Chan = (u8)(pstRequest->u16Value);
+
+  switch (u8Entity) {
+  case VOLUME_ID:
+    SetVolumeCtrl(u8Ctrl, u8Chan);
+    break;
+  }
+
+  // If the request wasn't ended for some reason then it's failed.
+  if (UsbGetCurrentRequest() != NULL) {
+    UsbFailRequest();
+  }
+}
+
+static void GetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange) {
+  if (u8Ctrl != USB_AUDIO_CLK_SRC_CTRL_SAM_FREQ || u8Chan != 0) {
+    return;
+  }
+
+  if (bIsRange) {
+    USB_AUDIO_RANGE_BLOCK(u32, 1)
+    stRanges = {
+        .u16NumRanges = 1,
+        .astRanges = {{44100, 44100, 0}},
+    };
+
+    UsbWrite(EPT_CTRL, &stRanges, sizeof(stRanges));
+  } else {
+    u32 u32SampleRate = 44100;
+    UsbWrite(EPT_CTRL, &u32SampleRate, sizeof(u32SampleRate));
+  }
+
+  UsbNextPacket(EPT_CTRL);
+}
+
+static void GetVolumeCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange) {
+  if (u8Chan != 0) {
+    return;
+  }
+
+  switch (u8Ctrl) {
+  case USB_AUDIO_FEAT_CTRL_MUTE:
+    if (bIsRange) {
+      return;
     }
-    s32SampleVal -= 25;
-    s32SampleVal *= INT16_MAX;
-    s32SampleVal /= 75;
-    as16Samples[u8Idx] = (s16)s32SampleVal;
+
+    u8 u8Muted = stUsb.bMuted;
+    UsbWrite(EPT_CTRL, &u8Muted, sizeof(u8Muted));
+    break;
+
+  case USB_AUDIO_FEAT_CTRL_VOLUME:
+    if (bIsRange) {
+      // 9 was the smallest scaling factor that didn't start resulting in duplicates in the table,
+      // and chose 100 steps just because.
+
+      USB_AUDIO_RANGE_BLOCK(s16, 1)
+      stRanges = {
+          .u16NumRanges = 1,
+          .astRanges = {{-900 + 9, 0, 9}},
+      };
+
+      UsbWrite(EPT_CTRL, &stRanges, sizeof(stRanges));
+
+    } else {
+      UsbWrite(EPT_CTRL, &stUsb.s16VolumeUsb, sizeof(stUsb.s16VolumeUsb));
+    }
+    break;
+
+  default:
+    return;
+  }
+
+  UsbNextPacket(EPT_CTRL);
+}
+
+static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan) {
+  if (u8Chan != 0) {
+    return;
+  }
+
+  switch (u8Ctrl) {
+  case USB_AUDIO_FEAT_CTRL_MUTE: {
+    u8 u8Mute;
+    if (sizeof(u8Mute) != UsbRead(EPT_CTRL, &u8Mute, sizeof(u8Mute))) {
+      return;
+    }
+
+    stUsb.bMuted = !!u8Mute;
+  } break;
+
+  case USB_AUDIO_FEAT_CTRL_VOLUME: {
+    if (sizeof(stUsb.s16VolumeUsb) != UsbRead(EPT_CTRL, &stUsb.s16VolumeUsb, sizeof(stUsb.s16VolumeUsb))) {
+      return;
+    }
+
+    if (stUsb.s16VolumeUsb == INT16_MIN) {
+      stUsb.s16VolumeRaw = 0;
+    } else {
+      s16 s16Idx = stUsb.s16VolumeUsb / 9;
+      if (s16Idx > 0) {
+        s16Idx = 0;
+      }
+      if (s16Idx < -99) {
+        s16Idx = -99;
+      }
+
+      // stUsb.s16VolumeUsb = s16Idx * 9;
+      s16Idx = -s16Idx;
+
+      // This table was generated using the python expression
+      // [int(10 ** ((-idx * 9) / 256) * (2**15 - 1)) for idx in range(100)]
+
+      static const s16 as16VolMap[100] = {
+          32767, 30219, 27869, 25702, 23703, 21860, 20160, 18592, 17146, 15813, 14583, 13449, 12403, 11439, 10549,
+          9729,  8972,  8275,  7631,  7038,  6491,  5986,  5520,  5091,  4695,  4330,  3993,  3683,  3396,  3132,
+          2889,  2664,  2457,  2266,  2089,  1927,  1777,  1639,  1511,  1394,  1285,  1185,  1093,  1008,  930,
+          857,   791,   729,   672,   620,   572,   527,   486,   448,   413,   381,   352,   324,   299,   276,
+          254,   234,   216,   199,   184,   169,   156,   144,   133,   122,   113,   104,   96,    88,    82,
+          75,    69,    64,    59,    54,    50,    46,    42,    39,    36,    33,    31,    28,    26,    24,
+          22,    20,    19,    17,    16,    14,    13,    12,    11,    10};
+
+      stUsb.s16VolumeRaw = as16VolMap[s16Idx];
+    }
+  } break;
+
+  default:
+    return;
+  }
+
+  UsbNextPacket(EPT_CTRL);
+}
+
+static bool GetAudioFrame(AudioFrame *pstFrame) {
+  static u8 u8SampleIdx = 0;
+  static u8 u8FrameIdx = 0;
+
+  pstFrame->u16NumSamples = 44;
+  if (++u8FrameIdx == 10) {
+    u8FrameIdx = 0;
+    pstFrame->u16NumSamples += 1;
+  }
+
+  for (u8 u8Idx = 0; u8Idx < pstFrame->u16NumSamples; u8Idx++) {
+    s32 s32Sample = u8SampleIdx;
+
+    s32Sample = abs(s32Sample - 50) - 25;
+    s32Sample = (s32Sample * INT16_MAX) / 50; // Don't saturate, to emulate something with headroom being recorded.
+    pstFrame->as16Samples[u8Idx] = (s16)s32Sample;
 
     if (++u8SampleIdx == 100) {
       u8SampleIdx = 0;
     }
   }
 
-  UsbWrite(EPT_AUDIO_OUT, as16Samples, u8Len * sizeof(s16));
+  return TRUE;
+}
+
+static void ProcessAudioFrame(AudioFrame *pstFrame) {
+  // TODO
+}
+
+static void SendAudioFrame(AudioFrame *pstFrame) {
+  if (stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_100_BYTES) {
+    return;
+  }
+
+  for (u8 u8Idx = 0; u8Idx < pstFrame->u16NumSamples; u8Idx++) {
+    s32 s32Sample = pstFrame->as16Samples[u8Idx];
+    if (stUsb.bMuted) {
+      s32Sample = 0;
+    } else {
+      s32Sample = (s32Sample * stUsb.s16VolumeRaw) / INT16_MAX;
+    }
+    pstFrame->as16Samples[u8Idx] = s32Sample;
+  }
+
+  UsbWrite(EPT_AUDIO_OUT, pstFrame->as16Samples, pstFrame->u16NumSamples * sizeof(pstFrame->as16Samples[0]));
   UsbNextPacket(EPT_AUDIO_OUT);
 }
 
@@ -709,7 +895,12 @@ static void UserApp1SM_Idle(void) {
     }
   }
 
-  SendAudioFrame();
+  AudioFrame stFrame;
+
+  if (GetAudioFrame(&stFrame)) {
+    ProcessAudioFrame(&stFrame);
+    SendAudioFrame(&stFrame);
+  }
 } /* end UserApp1SM_Idle() */
 
 /*-------------------------------------------------------------------------------------------------------------------*/

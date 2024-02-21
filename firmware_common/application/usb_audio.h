@@ -875,6 +875,16 @@ typedef struct __attribute__((packed)) {
   u16 u16LockDelay;
 } UsbAudioIsoEptDescType;
 
+#define USB_AUDIO_RANGE_BLOCK(PARAM_T, N_RANGES)                                                                       \
+  struct __attribute__((packed)) {                                                                                     \
+    u16 u16NumRanges;                                                                                                  \
+    struct __attribute__((packed)) {                                                                                   \
+      PARAM_T min;                                                                                                     \
+      PARAM_T max;                                                                                                     \
+      PARAM_T res;                                                                                                     \
+    } astRanges[N_RANGES];                                                                                             \
+  }
+
 //------------------------------------------------------------------------------
 // Constants
 //------------------------------------------------------------------------------
@@ -921,6 +931,15 @@ typedef struct __attribute__((packed)) {
     .stUsbHeader = {.u8Length = sizeof(UsbAudioOutTermDescType), .eType = USB_AUDIO_CS_IFACE},                         \
     .eSubtype = USB_AUDIO_AC_DESC_OUTPUT_TERM                                                                          \
   }
+
+#define USB_AUDIO_FEAT_DESC_HEADER(N)                                                                                  \
+  (UsbAudioDescHeaderType) {                                                                                           \
+    .stUsbHeader = {.u8Length = sizeof(USB_AUDIO_FEAT_DESC_TYPE(N)), .eType = USB_AUDIO_CS_IFACE},                     \
+    .eSubtype = USB_AUDIO_AC_DESC_FEATURE_UNIT                                                                         \
+  }
+
+#define USB_AUDIO_MONO_FEAT_DESC_HEADER USB_AUDIO_FEAT_DESC_HEADER(1)
+#define USB_AUDIO_STEREO_FEAT_DESC_HEADER USB_AUDIO_FEAT_DESC_HEADER(2)
 
 #define USB_AUDIO_STREAM_IFACE_DESC_HEADER                                                                             \
   (UsbAudioDescHeaderType) {                                                                                           \
