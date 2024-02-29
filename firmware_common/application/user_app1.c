@@ -90,6 +90,8 @@ static void HandleAudioCtrlWrite(const volatile UsbRequestStatusType *pstStatus,
 static void GetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
 static void GetVolumeCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
 static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan);
+static void GetSrcSelCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
+static void SetSrcSelCtrl(u8 u8Ctrl, u8 u8Chan);
 
 static bool GetAudioFrame(AudioFrame *pstFrame);
 static void ProcessAudioFrame(AudioFrame *pstFrame);
@@ -229,6 +231,8 @@ enum {
 enum {
   UNDEF_ID,
   FAKE_SRC_TERM_ID,
+  FAKE_SRC_TERM2_ID,
+  SRC_SEL_ID,
   OUT_TERM_ID,
   CLK_SRC_ID,
   VOLUME_ID,
@@ -298,10 +302,29 @@ static const UsbAudioInTermDescType stFakeSourceDesc = {
     .stChannels = MONO_CHANNEL_DESC,
 };
 
+static const UsbAudioInTermDescType stFakeSource2Desc = {
+    .stHeader = USB_AUDIO_IN_TERM_DESC_HEADER,
+    .u8TermId = FAKE_SRC_TERM2_ID,
+    .eTermType = USB_AUDIO_TERM_IN_MIC,
+    .u8ClkSrcId = CLK_SRC_ID,
+    .stChannels = MONO_CHANNEL_DESC,
+};
+
+static const UsbAudioSel2DescType stSrcSelDesc = {
+    .stHeader = USB_AUDIO_SEL_DESC_HEADER(2),
+    .u8UnitId = SRC_SEL_ID,
+    .u8NrInPins = 2,
+    .au8SrcIds = {FAKE_SRC_TERM_ID, FAKE_SRC_TERM2_ID},
+    .stControls =
+        {
+            .eSelector = USB_AUDIO_CTRL_PROP_HOST_PROG,
+        },
+};
+
 static const UsbAudioMonoFeatDescType stVolumeDesc = {
     .stHeader = USB_AUDIO_MONO_FEAT_DESC_HEADER,
     .u8UnitId = VOLUME_ID,
-    .u8SrcId = FAKE_SRC_TERM_ID,
+    .u8SrcId = SRC_SEL_ID,
     .astControls = {{
         .eVolume = USB_AUDIO_CTRL_PROP_HOST_PROG,
         .eMute = USB_AUDIO_CTRL_PROP_HOST_PROG,
@@ -317,7 +340,8 @@ static const UsbAudioOutTermDescType stOutTermDesc = {
 };
 
 static const UsbDescListType stAudioCtrlList =
-    MAKE_USB_DESC_LIST(&stAudioCtrlHeaderDesc, &stClkSrcDesc, &stFakeSourceDesc, &stVolumeDesc, &stOutTermDesc);
+    MAKE_USB_DESC_LIST(&stAudioCtrlHeaderDesc, &stClkSrcDesc, &stFakeSourceDesc, &stFakeSource2Desc, &stSrcSelDesc,
+                       &stVolumeDesc, &stOutTermDesc);
 
 static const UsbIfaceDescType stAudioUsbOutIfaceDesc_0Bytes = {
     .stHeader = USB_IFACE_DESC_HEADER,
@@ -383,6 +407,8 @@ static const UsbDescListType stMainCfgList =
           &stAudioCtrlHeaderDesc,
             &stClkSrcDesc,
             &stFakeSourceDesc,
+            &stFakeSource2Desc,
+            &stSrcSelDesc,
             &stVolumeDesc,
             &stOutTermDesc,
           &stAudioUsbOutIfaceDesc_0Bytes,
@@ -416,6 +442,7 @@ static const UsbEndpointConfigType astMainEpts[] = {{
 struct {
   u8 u8ActiveCfg;
   u8 u8OutAlt;
+  u8 u8SrcIdx;
 
   // Usb expects volumes in a S8.8 format with special value for -inf.
   // For fast calculation we want just a straight multiplier. So keep both around.
@@ -681,6 +708,10 @@ static void OnAudioCtrlRequest(const UsbSetupPacketType *pstRequest) {
   case VOLUME_ID:
     GetVolumeCtrl(u8Ctrl, u8Chan, bIsRange);
     break;
+
+  case SRC_SEL_ID:
+    GetSrcSelCtrl(u8Ctrl, u8Chan, bIsRange);
+    break;
   }
 }
 
@@ -699,6 +730,10 @@ static void HandleAudioCtrlWrite(const volatile UsbRequestStatusType *pstStatus,
   switch (u8Entity) {
   case VOLUME_ID:
     SetVolumeCtrl(u8Ctrl, u8Chan);
+    break;
+
+  case SRC_SEL_ID:
+    SetSrcSelCtrl(u8Ctrl, u8Chan);
     break;
   }
 
@@ -726,6 +761,34 @@ static void GetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange) {
     UsbWrite(EPT_CTRL, &u32SampleRate, sizeof(u32SampleRate));
   }
 
+  UsbNextPacket(EPT_CTRL);
+}
+
+static void GetSrcSelCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange) {
+  if (u8Ctrl != USB_AUDIO_SEL_CTRL_SELECTOR || u8Chan != 0 || bIsRange) {
+    return;
+  }
+
+  u8 u8Val = stUsb.u8SrcIdx + 1;
+  UsbWrite(EPT_CTRL, &u8Val, sizeof(u8Val));
+  UsbNextPacket(EPT_CTRL);
+}
+
+static void SetSrcSelCtrl(u8 u8Ctrl, u8 u8Chan) {
+  if (u8Ctrl != USB_AUDIO_SEL_CTRL_SELECTOR || u8Chan != 0) {
+    return;
+  }
+
+  u8 u8Val;
+  if (sizeof(u8Val) != UsbRead(EPT_CTRL, &u8Val, sizeof(u8Val))) {
+    return;
+  }
+
+  if (u8Val > 2 || u8Val == 0) {
+    return;
+  }
+
+  stUsb.u8SrcIdx = u8Val - 1;
   UsbNextPacket(EPT_CTRL);
 }
 
@@ -839,8 +902,14 @@ static bool GetAudioFrame(AudioFrame *pstFrame) {
   for (u8 u8Idx = 0; u8Idx < pstFrame->u16NumSamples; u8Idx++) {
     s32 s32Sample = u8SampleIdx;
 
-    s32Sample = abs(s32Sample - 50) - 25;
-    s32Sample = (s32Sample * INT16_MAX) / 50; // Don't saturate, to emulate something with headroom being recorded.
+    if (stUsb.u8SrcIdx == 0) {
+      s32Sample = abs(s32Sample - 50) - 25;
+      s32Sample = (s32Sample * INT16_MAX) / 50; // Don't saturate, to emulate something with headroom being recorded.
+    } else {
+      s32Sample -= 50;
+      s32Sample = (s32Sample * INT16_MAX) / 100;
+    }
+
     pstFrame->as16Samples[u8Idx] = (s16)s32Sample;
 
     if (++u8SampleIdx == 100) {

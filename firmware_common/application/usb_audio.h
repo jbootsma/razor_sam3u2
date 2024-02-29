@@ -932,6 +932,12 @@ typedef struct __attribute__((packed)) {
     .eSubtype = USB_AUDIO_AC_DESC_OUTPUT_TERM                                                                          \
   }
 
+#define USB_AUDIO_SEL_DESC_HEADER(N)                                                                                   \
+  (UsbAudioDescHeaderType) {                                                                                           \
+    .stUsbHeader = {.u8Length = sizeof(USB_AUDIO_SEL_DESC_TYPE(N)), .eType = USB_AUDIO_CS_IFACE},                      \
+    .eSubtype = USB_AUDIO_AC_DESC_SELECTOR_UNIT                                                                        \
+  }
+
 #define USB_AUDIO_FEAT_DESC_HEADER(N)                                                                                  \
   (UsbAudioDescHeaderType) {                                                                                           \
     .stUsbHeader = {.u8Length = sizeof(USB_AUDIO_FEAT_DESC_TYPE(N)), .eType = USB_AUDIO_CS_IFACE},                     \
