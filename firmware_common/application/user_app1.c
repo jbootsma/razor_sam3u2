@@ -75,10 +75,18 @@ static const s16 as16SinLut[65] = {0,     804,   1607,  2410,  3211,  4010,  480
                                    28890, 29260, 29613, 29948, 30264, 30563, 30843, 31105, 31347, 31571, 31776,
                                    31962, 32129, 32276, 32403, 32512, 32600, 32669, 32719, 32748, 32758};
 
+static s32 s32SampleRate;
+static s32 s32InvSampleRate;
+static u16 u16FrameLen;
+static u16 u16FrameRem;
+
 /**********************************************************************************************************************
 Private Function Prototypes
 **********************************************************************************************************************/
-#define MAX_SAMPLES 50
+#define MAX_SAMPLES 100
+#define DEFAULT_SAMPLE_RATE 44100
+#define MAX_SAMPLE_RATE 96000
+#define MIN_SAMPLE_RATE 1000
 
 typedef struct {
   u16 u16NumSamples;
@@ -98,6 +106,7 @@ static void OnUsbClassRequest(const UsbSetupPacketType *pstRequest);
 static void OnAudioCtrlRequest(const UsbSetupPacketType *pstRequest);
 static void HandleAudioCtrlWrite(const volatile UsbRequestStatusType *pstStatus, void *);
 static void GetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
+static void SetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan);
 static void GetVolumeCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
 static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan);
 static void GetSrcSelCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
@@ -106,6 +115,8 @@ static void SetSrcSelCtrl(u8 u8Ctrl, u8 u8Chan);
 static bool GetAudioFrame(AudioFrame *pstFrame);
 static void ProcessAudioFrame(AudioFrame *pstFrame);
 static void SendAudioFrame(AudioFrame *pstFrame);
+
+static void ApplySampleRate(void);
 
 static inline s16 tri_wave(s16 x_) {
   s32 y = abs(x_) - 0x4000;
@@ -191,6 +202,9 @@ void UserApp1Initialize(void) {
   LcdCommand(LCD_CLEAR_CMD);
   LcdMessage(LINE1_START_ADDR, "Audio Demo");
 
+  s32SampleRate = DEFAULT_SAMPLE_RATE;
+  ApplySampleRate();
+
   // Start assuming init will be good, ReportError() will override this if something bad happens.
   UserApp1_pfStateMachine = UserApp1SM_Idle;
 
@@ -270,7 +284,7 @@ enum {
 // Interface alts for audio output.
 enum {
   IFACE_AUDIO_OUT_ALT_0_BYTES,
-  IFACE_AUDIO_OUT_ALT_100_BYTES, // Can handle 48 KHz 16-bit mono.
+  IFACE_AUDIO_OUT_ALT_200_BYTES, // Can handle 48 KHz 16-bit mono.
 
   NUM_OUT_ALTS,
 };
@@ -286,6 +300,8 @@ enum {
   UNDEF_ID,
   FAKE_SRC_TERM_ID,
   FAKE_SRC_TERM2_ID,
+  // TODO: Make source-select an on-board thing. Windows kinda supports it by showing different devices, but it gets
+  // really glitchy.
   SRC_SEL_ID,
   OUT_TERM_ID,
   CLK_SRC_ID,
@@ -345,7 +361,7 @@ static const UsbAudioClkSrcDescType stClkSrcDesc = {
     .stHeader = USB_AUDIO_CLK_SRC_DESC_HEADER,
     .u8ClkId = CLK_SRC_ID,
     .stAttributes = {.eClkType = USB_AUDIO_CLK_INTERNAL_FIX},
-    .stControls = {.eClkFreq = USB_AUDIO_CTRL_PROP_READ_ONLY},
+    .stControls = {.eClkFreq = USB_AUDIO_CTRL_PROP_HOST_PROG},
 };
 
 static const UsbAudioInTermDescType stFakeSourceDesc = {
@@ -404,10 +420,10 @@ static const UsbIfaceDescType stAudioUsbOutIfaceDesc_0Bytes = {
     .stIfaceClass = USB_AUDIO_STREAM_CLASS,
 };
 
-static const UsbIfaceDescType stAudioUsbOutIfaceDesc_100Bytes = {
+static const UsbIfaceDescType stAudioUsbOutIfaceDesc_200Bytes = {
     .stHeader = USB_IFACE_DESC_HEADER,
     .u8IfaceIdx = IFACE_AUDIO_OUTPUT,
-    .u8AltIdx = IFACE_AUDIO_OUT_ALT_100_BYTES,
+    .u8AltIdx = IFACE_AUDIO_OUT_ALT_200_BYTES,
     .u8NumEpts = 1,
     .stIfaceClass = USB_AUDIO_STREAM_CLASS,
 };
@@ -427,7 +443,7 @@ static const UsbAudioTypeIFormatDescType stAudioFmtDesc = {
     .u8BitResolution = 16,
 };
 
-static const UsbEptDescType stAudioUsbOutEptDesc_100Bytes = {
+static const UsbEptDescType stAudioUsbOutEptDesc_200Bytes = {
     .stHeader = USB_EPT_DESC_HEADER,
     .stAddress =
         {
@@ -442,7 +458,7 @@ static const UsbEptDescType stAudioUsbOutEptDesc_100Bytes = {
         },
     .stMaxPacketSize =
         {
-            .u11PacketSize = 100,
+            .u11PacketSize = 200,
         },
     .u8Interval = 1, // 2^(1-1) == Every 1 frame.
 };
@@ -466,10 +482,10 @@ static const UsbDescListType stMainCfgList =
             &stVolumeDesc,
             &stOutTermDesc,
           &stAudioUsbOutIfaceDesc_0Bytes,
-          &stAudioUsbOutIfaceDesc_100Bytes,
+          &stAudioUsbOutIfaceDesc_200Bytes,
             &stAudioStreamDesc,
             &stAudioFmtDesc,
-            &stAudioUsbOutEptDesc_100Bytes,
+            &stAudioUsbOutEptDesc_200Bytes,
               &stAudioEptDesc);
 // clang-format on
 
@@ -486,7 +502,7 @@ static const UsbDriverConfigType stUsbDriverCfg = {
 };
 
 static const UsbEndpointConfigType astMainEpts[] = {{
-    .u16MaxPacketSize = 128,
+    .u16MaxPacketSize = 256,
     .u8NumPackets = 2,
     .eXferType = USB_XFER_ISO,
     .eDir = USB_EPT_DIR_TO_HOST,
@@ -782,6 +798,10 @@ static void HandleAudioCtrlWrite(const volatile UsbRequestStatusType *pstStatus,
   u8 u8Chan = (u8)(pstRequest->u16Value);
 
   switch (u8Entity) {
+  case CLK_SRC_ID:
+    SetClkSrcCtrl(u8Ctrl, u8Chan);
+    break;
+
   case VOLUME_ID:
     SetVolumeCtrl(u8Ctrl, u8Chan);
     break;
@@ -806,15 +826,33 @@ static void GetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange) {
     USB_AUDIO_RANGE_BLOCK(u32, 1)
     stRanges = {
         .u16NumRanges = 1,
-        .astRanges = {{44100, 44100, 0}},
+        .astRanges = {{MIN_SAMPLE_RATE, MAX_SAMPLE_RATE, 1}},
     };
 
     UsbWrite(EPT_CTRL, &stRanges, sizeof(stRanges));
   } else {
-    u32 u32SampleRate = 44100;
-    UsbWrite(EPT_CTRL, &u32SampleRate, sizeof(u32SampleRate));
+    UsbWrite(EPT_CTRL, &s32SampleRate, sizeof(s32SampleRate));
   }
 
+  UsbNextPacket(EPT_CTRL);
+}
+
+static void SetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan) {
+  if (u8Ctrl != USB_AUDIO_CLK_SRC_CTRL_SAM_FREQ || u8Chan != 0) {
+    return;
+  }
+
+  s32 s32NewRate;
+  if (sizeof(s32NewRate) != UsbRead(EPT_CTRL, &s32NewRate, sizeof(s32NewRate))) {
+    return;
+  }
+
+  if (s32NewRate < MIN_SAMPLE_RATE || s32NewRate > MAX_SAMPLE_RATE) {
+    return;
+  }
+
+  s32SampleRate = s32NewRate;
+  ApplySampleRate();
   UsbNextPacket(EPT_CTRL);
 }
 
@@ -944,13 +982,27 @@ static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan) {
 }
 
 static bool GetAudioFrame(AudioFrame *pstFrame) {
-  static u8 u8FrameIdx = 0;
+  static u16 u16FrameErrAccum = 0;
   static s16 s16Period = 0;
 
-  pstFrame->u16NumSamples = 44;
-  if (++u8FrameIdx == 10) {
-    u8FrameIdx = 0;
+  static const u16 u16Notes[] = {
+      C4, C4S, D4, D4S, E4, F4, F4S, G4, G4S, A4, A4S, B4,
+  };
+  static u32 u32NoteIdx = 0;
+  static u8 u8FrameCtr = 250;
+
+  if (--u8FrameCtr == 0) {
+    u8FrameCtr = 250;
+    u32NoteIdx++;
+  }
+  u16 u16Note = u16Notes[u32NoteIdx % 12];
+
+  pstFrame->u16NumSamples = u16FrameLen;
+  u16FrameErrAccum += u16FrameRem;
+
+  if (u16FrameErrAccum >= 1000) {
     pstFrame->u16NumSamples += 1;
+    u16FrameErrAccum -= 1000;
   }
 
   for (u8 u8Idx = 0; u8Idx < pstFrame->u16NumSamples; u8Idx++) {
@@ -964,8 +1016,9 @@ static bool GetAudioFrame(AudioFrame *pstFrame) {
 
     pstFrame->as16Samples[u8Idx] = s16Sample / 2;
 
-    // 440 Hz, sampled @ 44.1 Khz.
-    s16Period += 654;
+    // NOTE: There's a multiply by 2 folded into this.
+    // This is due to the range of a period being from -1.0 to 1.0.
+    s16Period += (u16Note * s32InvSampleRate + 0x3fff) >> 14;
   }
 
   return TRUE;
@@ -976,7 +1029,7 @@ static void ProcessAudioFrame(AudioFrame *pstFrame) {
 }
 
 static void SendAudioFrame(AudioFrame *pstFrame) {
-  if (stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_100_BYTES) {
+  if (stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_200_BYTES) {
     return;
   }
 
@@ -992,6 +1045,17 @@ static void SendAudioFrame(AudioFrame *pstFrame) {
 
   UsbWrite(EPT_AUDIO_OUT, pstFrame->as16Samples, pstFrame->u16NumSamples * sizeof(pstFrame->as16Samples[0]));
   UsbNextPacket(EPT_AUDIO_OUT);
+}
+
+static void ApplySampleRate(void) {
+  // Precalc the inverse of the sample rate to use for period advancement.
+  s32InvSampleRate = ((1 << 30) + (s32SampleRate / 2 - 1)) / s32SampleRate;
+  u16FrameLen = s32SampleRate / 1000;
+  u16FrameRem = s32SampleRate % 1000;
+
+  DebugPrintf("Sample rate is now ");
+  DebugPrintNumber(s32SampleRate);
+  DebugLineFeed();
 }
 
 /**********************************************************************************************************************
