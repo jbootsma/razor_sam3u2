@@ -65,6 +65,16 @@ Variable names shall start with "UserApp1_<type>" and be declared as static.
 static fnCode_type UserApp1_pfStateMachine; /*!< @brief The state machine function pointer */
 // static u32 UserApp1_u32Timeout;                           /*!< @brief Timeout counter used across states */
 
+// Generated using the accompanying sintable_gen.py
+#define FIXP_PI 102944
+
+static const s16 as16SinLut[65] = {0,     804,   1607,  2410,  3211,  4010,  4807,  5600,  6391,  7177,  7960,
+                                   8737,  9509,  10276, 11036, 11789, 12536, 13275, 14006, 14728, 15442, 16146,
+                                   16841, 17525, 18199, 18862, 19514, 20154, 20781, 21397, 21999, 22588, 23163,
+                                   23725, 24272, 24805, 25322, 25825, 26311, 26782, 27237, 27676, 28097, 28502,
+                                   28890, 29260, 29613, 29948, 30264, 30563, 30843, 31105, 31347, 31571, 31776,
+                                   31962, 32129, 32276, 32403, 32512, 32600, 32669, 32719, 32748, 32758};
+
 /**********************************************************************************************************************
 Private Function Prototypes
 **********************************************************************************************************************/
@@ -96,6 +106,50 @@ static void SetSrcSelCtrl(u8 u8Ctrl, u8 u8Chan);
 static bool GetAudioFrame(AudioFrame *pstFrame);
 static void ProcessAudioFrame(AudioFrame *pstFrame);
 static void SendAudioFrame(AudioFrame *pstFrame);
+
+static inline s16 tri_wave(s16 x_) {
+  s32 y = abs(x_) - 0x4000;
+  // Rather than multiply by 2, use slightly less in order to avoid undefined
+  // behaviour in the case where y = 0x4000.
+  return (y * 0xffff) >> 15;
+}
+
+/// @brief fixed point sin function.
+///
+/// Based on a 2-term taylor series expansion around points in a pre-computed lookup table.
+static inline s16 fix_sin(s16 x_) {
+  // Remap x from [-1.0, 1.0) into the equivalent period point within [0.0, 0.5]
+  // Remember sign for later application.
+  s32 s32sign = 1;
+  s32 x = x_;
+
+  // sin(-x) == -sin(x)
+  if (x < 0) {
+    x = -x;
+    s32sign = -1;
+  }
+
+  // Reflect around 0.5
+  if (x > 0x4000) {
+    x = 0x8000 - x;
+  }
+
+  // At this point x is in the range 0x0000 - 0x4000;
+  // Break it apart into an index into the lookup table and a delta.
+  // The delta is used to compute the first term of the taylor series expansion
+  // around the indexed point.
+  u8 u8Idx = x >> 8;
+  s32 s32Delta = x & 0xff;
+
+  // The delta needs to be multiplied out by pi to correct for the scaling used to generate the
+  // lookup table.
+  s32Delta = (s32Delta * FIXP_PI) >> 15;
+
+  // Compute terms of the taylor expansion.
+  s32 s32t0 = as16SinLut[u8Idx];
+  s32 s32t1 = (s32Delta * as16SinLut[64 - u8Idx]) >> 15;
+  return s32sign * (s32t0 + s32t1);
+}
 
 /**********************************************************************************************************************
 Function Definitions
@@ -890,8 +944,8 @@ static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan) {
 }
 
 static bool GetAudioFrame(AudioFrame *pstFrame) {
-  static u8 u8SampleIdx = 0;
   static u8 u8FrameIdx = 0;
+  static s16 s16Period = 0;
 
   pstFrame->u16NumSamples = 44;
   if (++u8FrameIdx == 10) {
@@ -900,21 +954,18 @@ static bool GetAudioFrame(AudioFrame *pstFrame) {
   }
 
   for (u8 u8Idx = 0; u8Idx < pstFrame->u16NumSamples; u8Idx++) {
-    s32 s32Sample = u8SampleIdx;
+    s16 s16Sample;
 
     if (stUsb.u8SrcIdx == 0) {
-      s32Sample = abs(s32Sample - 50) - 25;
-      s32Sample = (s32Sample * INT16_MAX) / 50; // Don't saturate, to emulate something with headroom being recorded.
+      s16Sample = tri_wave(s16Period);
     } else {
-      s32Sample -= 50;
-      s32Sample = (s32Sample * INT16_MAX) / 100;
+      s16Sample = fix_sin(s16Period);
     }
 
-    pstFrame->as16Samples[u8Idx] = (s16)s32Sample;
+    pstFrame->as16Samples[u8Idx] = s16Sample / 2;
 
-    if (++u8SampleIdx == 100) {
-      u8SampleIdx = 0;
-    }
+    // 440 Hz, sampled @ 44.1 Khz.
+    s16Period += 654;
   }
 
   return TRUE;
