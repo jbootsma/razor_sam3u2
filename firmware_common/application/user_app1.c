@@ -75,11 +75,6 @@ static const s16 as16SinLut[65] = {0,     804,   1607,  2410,  3211,  4010,  480
                                    28890, 29260, 29613, 29948, 30264, 30563, 30843, 31105, 31347, 31571, 31776,
                                    31962, 32129, 32276, 32403, 32512, 32600, 32669, 32719, 32748, 32758};
 
-static s32 s32SampleRate;
-static s32 s32InvSampleRate;
-static u16 u16FrameLen;
-static u16 u16FrameRem;
-
 /**********************************************************************************************************************
 Private Function Prototypes
 **********************************************************************************************************************/
@@ -93,7 +88,15 @@ typedef struct {
   s16 as16Samples[MAX_SAMPLES];
 } AudioFrame;
 
+typedef enum {
+  SRC_TRI_WAVE,
+  SRC_SIN_WAVE,
+
+  SRC_COUNT,
+} SourceSelect;
+
 static void ReportError(const char *pcMsg_);
+static void UpdateDisplay(void);
 
 static bool InitUsb(void);
 
@@ -109,14 +112,91 @@ static void GetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
 static void SetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan);
 static void GetVolumeCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
 static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan);
-static void GetSrcSelCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
-static void SetSrcSelCtrl(u8 u8Ctrl, u8 u8Chan);
 
 static bool GetAudioFrame(AudioFrame *pstFrame);
 static void ProcessAudioFrame(AudioFrame *pstFrame);
 static void SendAudioFrame(AudioFrame *pstFrame);
 
 static void ApplySampleRate(void);
+
+static s32 s32SampleRate;
+static s32 s32InvSampleRate;
+static u16 u16FrameLen;
+static u16 u16FrameRem;
+static bool bDisplayUpToDate;
+static SourceSelect eSource;
+
+/**********************************************************************************************************************
+Function Definitions
+**********************************************************************************************************************/
+
+/*--------------------------------------------------------------------------------------------------------------------*/
+/*! @publicsection */
+/*--------------------------------------------------------------------------------------------------------------------*/
+
+/*--------------------------------------------------------------------------------------------------------------------*/
+/*! @protectedsection */
+/*--------------------------------------------------------------------------------------------------------------------*/
+
+/*!--------------------------------------------------------------------------------------------------------------------
+@fn void UserApp1Initialize(void)
+
+@brief
+Initializes the State Machine and its variables.
+
+Should only be called once in main init section.
+
+Requires:
+- NONE
+
+Promises:
+- NONE
+
+*/
+void UserApp1Initialize(void) {
+  for (u8 led = 0; led < U8_TOTAL_LEDS; led++) {
+    LedOff(led);
+  }
+  LedOn(LCD_RED);
+  LedOn(LCD_GREEN);
+  LedOn(LCD_BLUE);
+
+  LcdCommand(LCD_DISPLAY_CMD | LCD_DISPLAY_ON);
+
+  s32SampleRate = DEFAULT_SAMPLE_RATE;
+  ApplySampleRate();
+
+  // Start assuming init will be good, ReportError() will override this if something bad happens.
+  UserApp1_pfStateMachine = UserApp1SM_Idle;
+
+  if (!InitUsb()) {
+    ReportError("Failed to initialize USB interface");
+  }
+} /* end UserApp1Initialize() */
+
+/*!----------------------------------------------------------------------------------------------------------------------
+@fn void UserApp1RunActiveState(void)
+
+@brief Selects and runs one iteration of the current state in the state machine.
+
+All state machines have a TOTAL of 1ms to execute, so on average n state
+machines may take 1ms / n to execute.
+
+Requires:
+- State machine function pointer points at current state
+
+Promises:
+- Calls the function to pointed by the state machine function pointer
+
+*/
+void UserApp1RunActiveState(void) { UserApp1_pfStateMachine(); } /* end UserApp1RunActiveState */
+
+/*------------------------------------------------------------------------------------------------------------------*/
+/*! @privatesection */
+/*--------------------------------------------------------------------------------------------------------------------*/
+
+#define _STRINGIFY(X) #X
+#define STRINGIFY(X) _STRINGIFY(X)
 
 static inline s16 tri_wave(s16 x_) {
   s32 y = abs(x_) - 0x4000;
@@ -161,82 +241,6 @@ static inline s16 fix_sin(s16 x_) {
   s32 s32t1 = (s32Delta * as16SinLut[64 - u8Idx]) >> 15;
   return s32sign * (s32t0 + s32t1);
 }
-
-/**********************************************************************************************************************
-Function Definitions
-**********************************************************************************************************************/
-
-/*--------------------------------------------------------------------------------------------------------------------*/
-/*! @publicsection */
-/*--------------------------------------------------------------------------------------------------------------------*/
-
-/*--------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */
-/*--------------------------------------------------------------------------------------------------------------------*/
-
-/*!--------------------------------------------------------------------------------------------------------------------
-@fn void UserApp1Initialize(void)
-
-@brief
-Initializes the State Machine and its variables.
-
-Should only be called once in main init section.
-
-Requires:
-- NONE
-
-Promises:
-- NONE
-
-*/
-void UserApp1Initialize(void) {
-  for (u8 led = 0; led < U8_TOTAL_LEDS; led++) {
-    LedOff(led);
-  }
-  LedOn(LCD_RED);
-  LedOn(LCD_GREEN);
-  LedOn(LCD_BLUE);
-
-  LcdCommand(LCD_DISPLAY_CMD | LCD_DISPLAY_ON);
-  LcdCommand(LCD_HOME_CMD);
-  LcdCommand(LCD_CLEAR_CMD);
-  LcdMessage(LINE1_START_ADDR, "Audio Demo");
-
-  s32SampleRate = DEFAULT_SAMPLE_RATE;
-  ApplySampleRate();
-
-  // Start assuming init will be good, ReportError() will override this if something bad happens.
-  UserApp1_pfStateMachine = UserApp1SM_Idle;
-
-  if (!InitUsb()) {
-    ReportError("Failed to initialize USB interface");
-  }
-
-} /* end UserApp1Initialize() */
-
-/*!----------------------------------------------------------------------------------------------------------------------
-@fn void UserApp1RunActiveState(void)
-
-@brief Selects and runs one iteration of the current state in the state machine.
-
-All state machines have a TOTAL of 1ms to execute, so on average n state
-machines may take 1ms / n to execute.
-
-Requires:
-- State machine function pointer points at current state
-
-Promises:
-- Calls the function to pointed by the state machine function pointer
-
-*/
-void UserApp1RunActiveState(void) { UserApp1_pfStateMachine(); } /* end UserApp1RunActiveState */
-
-/*------------------------------------------------------------------------------------------------------------------*/
-/*! @privatesection */
-/*--------------------------------------------------------------------------------------------------------------------*/
-
-#define _STRINGIFY(X) #X
-#define STRINGIFY(X) _STRINGIFY(X)
 
 /**********************************************************************************************************************
 USB application-specific constants and descriptors
@@ -298,11 +302,7 @@ enum {
 // Id's for all components in the audio chain.
 enum {
   UNDEF_ID,
-  FAKE_SRC_TERM_ID,
-  FAKE_SRC_TERM2_ID,
-  // TODO: Make source-select an on-board thing. Windows kinda supports it by showing different devices, but it gets
-  // really glitchy.
-  SRC_SEL_ID,
+  IN_TERM_ID,
   OUT_TERM_ID,
   CLK_SRC_ID,
   VOLUME_ID,
@@ -364,37 +364,18 @@ static const UsbAudioClkSrcDescType stClkSrcDesc = {
     .stControls = {.eClkFreq = USB_AUDIO_CTRL_PROP_HOST_PROG},
 };
 
-static const UsbAudioInTermDescType stFakeSourceDesc = {
+static const UsbAudioInTermDescType stSourceDesc = {
     .stHeader = USB_AUDIO_IN_TERM_DESC_HEADER,
-    .u8TermId = FAKE_SRC_TERM_ID,
-    .eTermType = USB_AUDIO_TERM_IN_MIC,
+    .u8TermId = IN_TERM_ID,
+    .eTermType = USB_AUDIO_TERM_EXT_GEN_ANALOG,
     .u8ClkSrcId = CLK_SRC_ID,
     .stChannels = MONO_CHANNEL_DESC,
-};
-
-static const UsbAudioInTermDescType stFakeSource2Desc = {
-    .stHeader = USB_AUDIO_IN_TERM_DESC_HEADER,
-    .u8TermId = FAKE_SRC_TERM2_ID,
-    .eTermType = USB_AUDIO_TERM_IN_MIC,
-    .u8ClkSrcId = CLK_SRC_ID,
-    .stChannels = MONO_CHANNEL_DESC,
-};
-
-static const UsbAudioSel2DescType stSrcSelDesc = {
-    .stHeader = USB_AUDIO_SEL_DESC_HEADER(2),
-    .u8UnitId = SRC_SEL_ID,
-    .u8NrInPins = 2,
-    .au8SrcIds = {FAKE_SRC_TERM_ID, FAKE_SRC_TERM2_ID},
-    .stControls =
-        {
-            .eSelector = USB_AUDIO_CTRL_PROP_HOST_PROG,
-        },
 };
 
 static const UsbAudioMonoFeatDescType stVolumeDesc = {
     .stHeader = USB_AUDIO_MONO_FEAT_DESC_HEADER,
     .u8UnitId = VOLUME_ID,
-    .u8SrcId = SRC_SEL_ID,
+    .u8SrcId = IN_TERM_ID,
     .astControls = {{
         .eVolume = USB_AUDIO_CTRL_PROP_HOST_PROG,
         .eMute = USB_AUDIO_CTRL_PROP_HOST_PROG,
@@ -410,8 +391,7 @@ static const UsbAudioOutTermDescType stOutTermDesc = {
 };
 
 static const UsbDescListType stAudioCtrlList =
-    MAKE_USB_DESC_LIST(&stAudioCtrlHeaderDesc, &stClkSrcDesc, &stFakeSourceDesc, &stFakeSource2Desc, &stSrcSelDesc,
-                       &stVolumeDesc, &stOutTermDesc);
+    MAKE_USB_DESC_LIST(&stAudioCtrlHeaderDesc, &stClkSrcDesc, &stSourceDesc, &stVolumeDesc, &stOutTermDesc);
 
 static const UsbIfaceDescType stAudioUsbOutIfaceDesc_0Bytes = {
     .stHeader = USB_IFACE_DESC_HEADER,
@@ -476,9 +456,7 @@ static const UsbDescListType stMainCfgList =
         &stAudioCtrlDesc,
           &stAudioCtrlHeaderDesc,
             &stClkSrcDesc,
-            &stFakeSourceDesc,
-            &stFakeSource2Desc,
-            &stSrcSelDesc,
+            &stSourceDesc,
             &stVolumeDesc,
             &stOutTermDesc,
           &stAudioUsbOutIfaceDesc_0Bytes,
@@ -510,15 +488,14 @@ static const UsbEndpointConfigType astMainEpts[] = {{
 
 // USB state variables.
 struct {
-  u8 u8ActiveCfg;
-  u8 u8OutAlt;
-  u8 u8SrcIdx;
-
   // Usb expects volumes in a S8.8 format with special value for -inf.
   // For fast calculation we want just a straight multiplier. So keep both around.
   // Conversion is handled when the volume is set over USB.
   s16 s16VolumeUsb;
   s16 s16VolumeRaw;
+
+  u8 u8ActiveCfg;
+  u8 u8OutAlt;
 
   bool bMuted;
 } stUsb;
@@ -531,6 +508,79 @@ static void ReportError(const char *pcMsg_) {
   DebugPrintf((u8 *)pcMsg_);
   DebugLineFeed();
   UserApp1_pfStateMachine = UserApp1SM_Error;
+}
+
+static void UpdateDisplay(void) {
+  static u8 u8KeepOut = 0; // Timer to keep from updating the display too fast.
+
+  if (bDisplayUpToDate) {
+    return;
+  }
+
+  if (u8KeepOut > 0) {
+    u8KeepOut--;
+    return;
+  }
+
+  u8KeepOut = 50;
+  bDisplayUpToDate = TRUE;
+
+  LcdCommand(LCD_HOME_CMD);
+  LcdCommand(LCD_CLEAR_CMD);
+
+  if (!UsbIsEnabled()) {
+    LcdMessage(LINE1_START_ADDR, "USB is disabled");
+    LcdMessage(LINE2_START_ADDR, "Button 1 to enable");
+    return;
+  }
+
+  char acLine[U8_LCD_MAX_LINE_DISPLAY_SIZE + 1];
+
+  bool bUsbActive = stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_0_BYTES;
+  snprintf(acLine, sizeof(acLine), "Usb %s %ldHz", bUsbActive ? "active" : "idle", s32SampleRate);
+  LcdMessage(LINE1_START_ADDR, acLine);
+
+  const char *pcSrc = NULL;
+  switch (eSource) {
+  case SRC_TRI_WAVE:
+    pcSrc = "TRI";
+    break;
+
+  case SRC_SIN_WAVE:
+    pcSrc = "SIN";
+    break;
+
+  default:
+    pcSrc = "???";
+    break;
+  }
+
+  const char *pcVol;
+  if (stUsb.bMuted) {
+    pcVol = "M";
+  } else {
+    if (stUsb.s16VolumeUsb == 0) {
+      pcVol = "-inf dB";
+    } else {
+      // newlib-nano doesn't support %f in printf, so manually break down
+      // the value.
+
+      // Convert from S8.8 into multiples of 0.01.
+      s16 s16MilliDbs = (stUsb.s16VolumeUsb * 100 + 128) / 256;
+      const char *pcSign = "";
+      if (s16MilliDbs < 0) {
+        pcSign = "-";
+        s16MilliDbs = -s16MilliDbs;
+      }
+
+      static char acVolStr[11];
+      snprintf(acVolStr, sizeof(acVolStr), "%s%d.%02d dB", pcSign, s16MilliDbs / 100, s16MilliDbs % 100);
+      pcVol = acVolStr;
+    }
+  }
+
+  snprintf(acLine, sizeof(acLine), "S:%s, V:%s", pcSrc, pcVol);
+  LcdMessage(LINE2_START_ADDR, acLine);
 }
 
 static bool InitUsb(void) {
@@ -555,6 +605,7 @@ static void HandleUsbEvent(UsbEventIdType eEvt_) {
     // TODO: factor out once there's more to do than clear numbers.
     stUsb.u8ActiveCfg = NO_CFG;
     stUsb.u8OutAlt = IFACE_AUDIO_OUT_ALT_0_BYTES;
+    bDisplayUpToDate = FALSE;
 
     if (!UsbSetEndpointsConfig(0, NULL)) {
       ReportError("Could not clear endpoints");
@@ -625,6 +676,7 @@ static void OnStandardUsbRequest(const UsbSetupPacketType *pstRequest) {
     if (pstRequest->u16Value < CFG_COUNT) {
       stUsb.u8ActiveCfg = pstRequest->u16Value;
       stUsb.u8OutAlt = IFACE_AUDIO_OUT_ALT_0_BYTES;
+      bDisplayUpToDate = FALSE;
 
       DebugPrintf("Switching to CFG ");
       DebugPrintNumber(pstRequest->u16Value);
@@ -659,6 +711,7 @@ static void OnStandardUsbRequest(const UsbSetupPacketType *pstRequest) {
           DebugLineFeed();
 
           stUsb.u8OutAlt = (u8)pstRequest->u16Value;
+          bDisplayUpToDate = FALSE;
           UsbNextPacket(EPT_CTRL);
         }
       }
@@ -778,10 +831,6 @@ static void OnAudioCtrlRequest(const UsbSetupPacketType *pstRequest) {
   case VOLUME_ID:
     GetVolumeCtrl(u8Ctrl, u8Chan, bIsRange);
     break;
-
-  case SRC_SEL_ID:
-    GetSrcSelCtrl(u8Ctrl, u8Chan, bIsRange);
-    break;
   }
 }
 
@@ -805,11 +854,9 @@ static void HandleAudioCtrlWrite(const volatile UsbRequestStatusType *pstStatus,
   case VOLUME_ID:
     SetVolumeCtrl(u8Ctrl, u8Chan);
     break;
-
-  case SRC_SEL_ID:
-    SetSrcSelCtrl(u8Ctrl, u8Chan);
-    break;
   }
+
+  bDisplayUpToDate = FALSE;
 
   // If the request wasn't ended for some reason then it's failed.
   if (UsbGetCurrentRequest() != NULL) {
@@ -853,34 +900,6 @@ static void SetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan) {
 
   s32SampleRate = s32NewRate;
   ApplySampleRate();
-  UsbNextPacket(EPT_CTRL);
-}
-
-static void GetSrcSelCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange) {
-  if (u8Ctrl != USB_AUDIO_SEL_CTRL_SELECTOR || u8Chan != 0 || bIsRange) {
-    return;
-  }
-
-  u8 u8Val = stUsb.u8SrcIdx + 1;
-  UsbWrite(EPT_CTRL, &u8Val, sizeof(u8Val));
-  UsbNextPacket(EPT_CTRL);
-}
-
-static void SetSrcSelCtrl(u8 u8Ctrl, u8 u8Chan) {
-  if (u8Ctrl != USB_AUDIO_SEL_CTRL_SELECTOR || u8Chan != 0) {
-    return;
-  }
-
-  u8 u8Val;
-  if (sizeof(u8Val) != UsbRead(EPT_CTRL, &u8Val, sizeof(u8Val))) {
-    return;
-  }
-
-  if (u8Val > 2 || u8Val == 0) {
-    return;
-  }
-
-  stUsb.u8SrcIdx = u8Val - 1;
   UsbNextPacket(EPT_CTRL);
 }
 
@@ -1008,10 +1027,17 @@ static bool GetAudioFrame(AudioFrame *pstFrame) {
   for (u8 u8Idx = 0; u8Idx < pstFrame->u16NumSamples; u8Idx++) {
     s16 s16Sample;
 
-    if (stUsb.u8SrcIdx == 0) {
+    switch (eSource) {
+    case SRC_TRI_WAVE:
       s16Sample = tri_wave(s16Period);
-    } else {
+      break;
+
+    case SRC_SIN_WAVE:
       s16Sample = fix_sin(s16Period);
+      break;
+
+    default:
+      s16Sample = 0;
     }
 
     pstFrame->as16Samples[u8Idx] = s16Sample / 2;
@@ -1077,6 +1103,19 @@ static void UserApp1SM_Idle(void) {
     if (!UsbSetEnabled(bEnable)) {
       ReportError("Unable to change USB peripheral state");
     }
+
+    bDisplayUpToDate = FALSE;
+  }
+
+  if (WasButtonPressed(BUTTON1)) {
+    ButtonAcknowledge(BUTTON1);
+
+    eSource++;
+    if (eSource >= SRC_COUNT) {
+      eSource = 0;
+    }
+
+    bDisplayUpToDate = FALSE;
   }
 
   AudioFrame stFrame;
@@ -1085,6 +1124,8 @@ static void UserApp1SM_Idle(void) {
     ProcessAudioFrame(&stFrame);
     SendAudioFrame(&stFrame);
   }
+
+  UpdateDisplay();
 } /* end UserApp1SM_Idle() */
 
 /*-------------------------------------------------------------------------------------------------------------------*/

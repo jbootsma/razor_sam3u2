@@ -48,6 +48,7 @@ Includes
 /* Common header files */
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include "sam3u2c.h"
 #include "exceptions.h"
 #include "interrupts.h"
