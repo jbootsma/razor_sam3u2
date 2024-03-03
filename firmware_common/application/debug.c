@@ -1017,7 +1017,6 @@ void DebugSM_Idle(void)
 {
   bool bCommandFound = FALSE;
   u8 u8CurrentByte;
-  u8 u8Counter;
   static u8 au8BackspaceSequence[] = {ASCII_BACKSPACE, ' ', ASCII_BACKSPACE};
   static u8 au8CommandOverflow[] = "\r\n*** Command too long ***\r\n\n";
 
@@ -1131,12 +1130,24 @@ void DebugSM_Idle(void)
   } /* end while */
 
   /* Clear out any completed messages (Query automatically removes if complete ) */
-  u8Counter = 0;
-  while ( (u8Counter < DEBUG_TOKEN_ARRAY_SIZE) &&
-          (Debug_au32MsgTokens[u8Counter] != 0) )
+  for (u8 u8Counter = 0; u8Counter < DEBUG_TOKEN_ARRAY_SIZE; u8Counter++)
   {
-    QueryMessageStatus(Debug_au32MsgTokens[u8Counter]);
-    u8Counter++;
+    if (Debug_au32MsgTokens[u8Counter] == 0) {
+      continue;
+    }
+
+    switch (QueryMessageStatus(Debug_au32MsgTokens[u8Counter])) {
+      case WAITING:
+      case SENDING:
+        // Check again later, message is still in progress.
+        break;
+
+      default:
+        // All other cases mean the message has terminated. Clean up to not waste time checking
+        // again later.
+        Debug_au32MsgTokens[u8Counter] = 0;
+        break;
+    }
   }
 
 } /* end DebugSM_Idle() */
