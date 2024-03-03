@@ -678,10 +678,6 @@ static void OnStandardUsbRequest(const UsbSetupPacketType *pstRequest) {
       stUsb.u8OutAlt = IFACE_AUDIO_OUT_ALT_0_BYTES;
       bDisplayUpToDate = FALSE;
 
-      DebugPrintf("Switching to CFG ");
-      DebugPrintNumber(pstRequest->u16Value);
-      DebugLineFeed();
-
       switch (stUsb.u8ActiveCfg) {
       case MAIN_CFG:
         if (!UsbSetEndpointsConfig(sizeof(astMainEpts) / sizeof(astMainEpts[0]), astMainEpts)) {
@@ -706,10 +702,6 @@ static void OnStandardUsbRequest(const UsbSetupPacketType *pstRequest) {
     if (stUsb.u8ActiveCfg == MAIN_CFG) {
       if (pstRequest->u16Index == IFACE_AUDIO_OUTPUT) {
         if (pstRequest->u16Value < NUM_OUT_ALTS) {
-          DebugPrintf("Changing out iface to alt ");
-          DebugPrintNumber(pstRequest->u16Value);
-          DebugLineFeed();
-
           stUsb.u8OutAlt = (u8)pstRequest->u16Value;
           bDisplayUpToDate = FALSE;
           UsbNextPacket(EPT_CTRL);
@@ -1078,10 +1070,6 @@ static void ApplySampleRate(void) {
   s32InvSampleRate = ((1 << 30) + (s32SampleRate / 2 - 1)) / s32SampleRate;
   u16FrameLen = s32SampleRate / 1000;
   u16FrameRem = s32SampleRate % 1000;
-
-  DebugPrintf("Sample rate is now ");
-  DebugPrintNumber(s32SampleRate);
-  DebugLineFeed();
 }
 
 /**********************************************************************************************************************
