@@ -108,7 +108,7 @@ Other Notes:
 - [X] Fixed rate triangle wave (441 Hz).
 - [X] Volume + Mute
 - [X] Sample rate control
-- [ ] Loopback input
+- [X] Loopback input
 - [X] Source selection
 - [ ] Volume visualization
 - [ ] ADC input

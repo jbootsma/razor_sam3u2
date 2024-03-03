@@ -89,11 +89,14 @@ typedef struct {
 } AudioFrame;
 
 typedef enum {
+  SRC_LOOPBACK,
   SRC_TRI_WAVE,
   SRC_SIN_WAVE,
 
   SRC_COUNT,
 } SourceSelect;
+
+typedef s16 (*SamplerFunc)(s16);
 
 static void ReportError(const char *pcMsg_);
 static void UpdateDisplay(void);
@@ -114,6 +117,7 @@ static void GetVolumeCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
 static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan);
 
 static bool GetAudioFrame(AudioFrame *pstFrame);
+static void SynthAudioFrame(AudioFrame *pstFrame, SamplerFunc pfnSampler);
 static void ProcessAudioFrame(AudioFrame *pstFrame);
 static void SendAudioFrame(AudioFrame *pstFrame);
 
@@ -281,6 +285,7 @@ enum {
 enum {
   IFACE_AUDIO_CTRL,
   IFACE_AUDIO_OUTPUT,
+  IFACE_AUDIO_INPUT,
 
   IFACE_COUNT,
 };
@@ -293,10 +298,19 @@ enum {
   NUM_OUT_ALTS,
 };
 
+// Interface alts for audio input.
+enum {
+  IFACE_AUDIO_IN_ALT_0_BYTES,
+  IFACE_AUDIO_IN_ALT_200_BYTES, // Can handle 48 KHz 16-bit mono.
+
+  NUM_IN_ALTS,
+};
+
 // Endpoint numbers
 enum {
   EPT_CTRL,
   EPT_AUDIO_OUT,
+  EPT_AUDIO_IN,
 };
 
 // Id's for all components in the audio chain.
@@ -306,6 +320,10 @@ enum {
   OUT_TERM_ID,
   CLK_SRC_ID,
   VOLUME_ID,
+
+  // For accepting audio from the USB host.
+  LOOP_IN_TERM_ID,
+  LOOP_OUT_TERM_ID,
 };
 
 // Descriptors
@@ -341,7 +359,7 @@ static UsbCfgDescType stMainCfgDesc = {
 static const UsbIfaceAssocDescType stAudioIad = {
     .stHeader = USB_IFACE_ASSOC_DESC_HEADER,
     .u8FirstInterface = IFACE_AUDIO_CTRL,
-    .u8InterfaceCount = 2,
+    .u8InterfaceCount = 3,
     .stFunctionClass = USB_AUDIO_FUNC_CLASS,
 };
 
@@ -390,8 +408,24 @@ static const UsbAudioOutTermDescType stOutTermDesc = {
     .u8ClkSrcId = CLK_SRC_ID,
 };
 
-static const UsbDescListType stAudioCtrlList =
-    MAKE_USB_DESC_LIST(&stAudioCtrlHeaderDesc, &stClkSrcDesc, &stSourceDesc, &stVolumeDesc, &stOutTermDesc);
+static const UsbAudioInTermDescType stLoopInDesc = {
+    .stHeader = USB_AUDIO_IN_TERM_DESC_HEADER,
+    .u8TermId = LOOP_IN_TERM_ID,
+    .eTermType = USB_AUDIO_TERM_USB_STREAM,
+    .u8ClkSrcId = CLK_SRC_ID,
+    .stChannels = MONO_CHANNEL_DESC,
+};
+
+static const UsbAudioOutTermDescType stLoopOutDesc = {
+    .stHeader = USB_AUDIO_OUT_TERM_DESC_HEADER,
+    .u8TermId = LOOP_OUT_TERM_ID,
+    .eTermType = USB_AUDIO_TERM_OUT_SPEAKER,
+    .u8SrcId = LOOP_IN_TERM_ID,
+    .u8ClkSrcId = CLK_SRC_ID,
+};
+
+static const UsbDescListType stAudioCtrlList = MAKE_USB_DESC_LIST(
+    &stAudioCtrlHeaderDesc, &stClkSrcDesc, &stSourceDesc, &stVolumeDesc, &stOutTermDesc, &stLoopInDesc, &stLoopOutDesc);
 
 static const UsbIfaceDescType stAudioUsbOutIfaceDesc_0Bytes = {
     .stHeader = USB_IFACE_DESC_HEADER,
@@ -412,7 +446,7 @@ static const UsbAudioStreamIfaceDescType stAudioStreamDesc = {
     .stHeader = USB_AUDIO_STREAM_IFACE_DESC_HEADER,
     .u8TerminalLink = OUT_TERM_ID,
     .eFormatType = USB_AUDIO_FORMAT_TYPE_I,
-    .uFormats = {.stTypeI = {.bPcm = 1}},
+    .uFormats = {.stTypeI = {.bPcm = TRUE}},
     .stChannels = MONO_CHANNEL_DESC,
 };
 
@@ -447,6 +481,50 @@ static const UsbAudioIsoEptDescType stAudioEptDesc = {
     .stHeader = USB_AUDIO_ISO_EPT_DESC_HEADER,
 };
 
+static const UsbIfaceDescType stAudioUsbInIfaceDesc_0bytes = {
+    .stHeader = USB_IFACE_DESC_HEADER,
+    .u8IfaceIdx = IFACE_AUDIO_INPUT,
+    .u8AltIdx = IFACE_AUDIO_IN_ALT_0_BYTES,
+    .u8NumEpts = 0,
+    .stIfaceClass = USB_AUDIO_STREAM_CLASS,
+};
+
+static const UsbIfaceDescType stAudioUsbInIfaceDesc_200bytes = {
+    .stHeader = USB_IFACE_DESC_HEADER,
+    .u8IfaceIdx = IFACE_AUDIO_INPUT,
+    .u8AltIdx = IFACE_AUDIO_IN_ALT_200_BYTES,
+    .u8NumEpts = 1,
+    .stIfaceClass = USB_AUDIO_STREAM_CLASS,
+};
+
+static const UsbAudioStreamIfaceDescType stAudioUsbInStreamDesc = {
+    .stHeader = USB_AUDIO_STREAM_IFACE_DESC_HEADER,
+    .u8TerminalLink = LOOP_IN_TERM_ID,
+    .eFormatType = USB_AUDIO_FORMAT_TYPE_I,
+    .uFormats.stTypeI = {.bPcm = TRUE},
+    .stChannels = MONO_CHANNEL_DESC,
+};
+
+static const UsbEptDescType stAudioUsbInEptDesc_200bytes = {
+    .stHeader = USB_EPT_DESC_HEADER,
+    .stAddress =
+        {
+            .u4EptNum = EPT_AUDIO_IN,
+            .eDir = USB_EPT_DIR_FROM_HOST,
+        },
+    .stAttrib =
+        {
+            .eXfer = USB_XFER_ISO,
+            .eSync = USB_SYNC_SYNC,
+            .eUsage = USB_EPT_USAGE_DATA,
+        },
+    .stMaxPacketSize =
+        {
+            .u11PacketSize = 200,
+        },
+    .u8Interval = 1,
+};
+
 // Use some explicit formatting to show the hierarchial structure of the descriptors.
 // clang-format off
 static const UsbDescListType stMainCfgList =
@@ -459,11 +537,19 @@ static const UsbDescListType stMainCfgList =
             &stSourceDesc,
             &stVolumeDesc,
             &stOutTermDesc,
-          &stAudioUsbOutIfaceDesc_0Bytes,
+            &stLoopInDesc,
+            &stLoopOutDesc,
+        &stAudioUsbOutIfaceDesc_0Bytes,
           &stAudioUsbOutIfaceDesc_200Bytes,
             &stAudioStreamDesc,
             &stAudioFmtDesc,
             &stAudioUsbOutEptDesc_200Bytes,
+              &stAudioEptDesc,
+        &stAudioUsbInIfaceDesc_0bytes,
+          &stAudioUsbInIfaceDesc_200bytes,
+            &stAudioUsbInStreamDesc,
+            &stAudioFmtDesc,
+            &stAudioUsbInEptDesc_200bytes,
               &stAudioEptDesc);
 // clang-format on
 
@@ -479,12 +565,20 @@ static const UsbDriverConfigType stUsbDriverCfg = {
     .bHighSpeedEnabled = FALSE,
 };
 
-static const UsbEndpointConfigType astMainEpts[] = {{
-    .u16MaxPacketSize = 256,
-    .u8NumPackets = 2,
-    .eXferType = USB_XFER_ISO,
-    .eDir = USB_EPT_DIR_TO_HOST,
-}};
+static const UsbEndpointConfigType astMainEpts[] = {
+    {
+        .u16MaxPacketSize = 256,
+        .u8NumPackets = 2,
+        .eXferType = USB_XFER_ISO,
+        .eDir = USB_EPT_DIR_TO_HOST,
+    },
+    {
+        .u16MaxPacketSize = 256,
+        .u8NumPackets = 2,
+        .eXferType = USB_XFER_ISO,
+        .eDir = USB_EPT_DIR_FROM_HOST,
+    },
+};
 
 // USB state variables.
 struct {
@@ -496,6 +590,7 @@ struct {
 
   u8 u8ActiveCfg;
   u8 u8OutAlt;
+  u8 u8InAlt;
 
   bool bMuted;
 } stUsb;
@@ -536,12 +631,17 @@ static void UpdateDisplay(void) {
 
   char acLine[U8_LCD_MAX_LINE_DISPLAY_SIZE + 1];
 
-  bool bUsbActive = stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_0_BYTES;
-  snprintf(acLine, sizeof(acLine), "Usb %s %ldHz", bUsbActive ? "active" : "idle", s32SampleRate);
+  char cOutState = stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_0_BYTES ? 'O' : '-';
+  char cInState = stUsb.u8InAlt != IFACE_AUDIO_IN_ALT_0_BYTES ? 'I' : '-';
+  snprintf(acLine, sizeof(acLine), "USB %c%c %ldHz", cInState, cOutState, s32SampleRate);
   LcdMessage(LINE1_START_ADDR, acLine);
 
   const char *pcSrc = NULL;
   switch (eSource) {
+  case SRC_LOOPBACK:
+    pcSrc = "LOOP";
+    break;
+
   case SRC_TRI_WAVE:
     pcSrc = "TRI";
     break;
@@ -589,6 +689,7 @@ static bool InitUsb(void) {
 
   stUsb.u8ActiveCfg = NO_CFG;
   stUsb.u8OutAlt = IFACE_AUDIO_OUT_ALT_0_BYTES;
+  stUsb.u8InAlt = IFACE_AUDIO_IN_ALT_0_BYTES;
 
   stUsb.bMuted = TRUE;
   stUsb.s16VolumeUsb = 0x8000;
@@ -605,6 +706,7 @@ static void HandleUsbEvent(UsbEventIdType eEvt_) {
     // TODO: factor out once there's more to do than clear numbers.
     stUsb.u8ActiveCfg = NO_CFG;
     stUsb.u8OutAlt = IFACE_AUDIO_OUT_ALT_0_BYTES;
+    stUsb.u8InAlt = IFACE_AUDIO_IN_ALT_0_BYTES;
     bDisplayUpToDate = FALSE;
 
     if (!UsbSetEndpointsConfig(0, NULL)) {
@@ -661,6 +763,11 @@ static void OnStandardUsbRequest(const UsbSetupPacketType *pstRequest) {
         u8Alt = stUsb.u8OutAlt;
         break;
 
+      case IFACE_AUDIO_INPUT:
+        bSend = TRUE;
+        u8Alt = stUsb.u8InAlt;
+        break;
+
       default:
         break;
       }
@@ -700,12 +807,22 @@ static void OnStandardUsbRequest(const UsbSetupPacketType *pstRequest) {
 
   case USB_REQ_SET_IFACE:
     if (stUsb.u8ActiveCfg == MAIN_CFG) {
-      if (pstRequest->u16Index == IFACE_AUDIO_OUTPUT) {
+      switch (pstRequest->u16Index) {
+      case IFACE_AUDIO_OUTPUT:
         if (pstRequest->u16Value < NUM_OUT_ALTS) {
           stUsb.u8OutAlt = (u8)pstRequest->u16Value;
           bDisplayUpToDate = FALSE;
           UsbNextPacket(EPT_CTRL);
         }
+        break;
+
+      case IFACE_AUDIO_INPUT:
+        if (pstRequest->u16Value < NUM_IN_ALTS) {
+          stUsb.u8InAlt = (u8)pstRequest->u16Value;
+          bDisplayUpToDate = FALSE;
+          UsbNextPacket(EPT_CTRL);
+        }
+        break;
       }
     }
     break;
@@ -993,6 +1110,33 @@ static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan) {
 }
 
 static bool GetAudioFrame(AudioFrame *pstFrame) {
+  switch (eSource) {
+  case SRC_LOOPBACK:
+    if (!UsbIsPacketReady(EPT_AUDIO_IN)) {
+      return FALSE;
+    }
+
+    pstFrame->u16NumSamples = UsbRead(EPT_AUDIO_IN, pstFrame->as16Samples, sizeof(pstFrame->as16Samples));
+    pstFrame->u16NumSamples /= sizeof(s16);
+    UsbNextPacket(EPT_AUDIO_IN);
+    break;
+
+  case SRC_TRI_WAVE:
+    SynthAudioFrame(pstFrame, tri_wave);
+    break;
+
+  case SRC_SIN_WAVE:
+    SynthAudioFrame(pstFrame, fix_sin);
+    break;
+
+  default:
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+static void SynthAudioFrame(AudioFrame *pstFrame, SamplerFunc pfnSampler) {
   static u16 u16FrameErrAccum = 0;
   static s16 s16Period = 0;
 
@@ -1017,20 +1161,7 @@ static bool GetAudioFrame(AudioFrame *pstFrame) {
   }
 
   for (u8 u8Idx = 0; u8Idx < pstFrame->u16NumSamples; u8Idx++) {
-    s16 s16Sample;
-
-    switch (eSource) {
-    case SRC_TRI_WAVE:
-      s16Sample = tri_wave(s16Period);
-      break;
-
-    case SRC_SIN_WAVE:
-      s16Sample = fix_sin(s16Period);
-      break;
-
-    default:
-      s16Sample = 0;
-    }
+    s16 s16Sample = pfnSampler(s16Period);
 
     pstFrame->as16Samples[u8Idx] = s16Sample / 2;
 
@@ -1038,8 +1169,6 @@ static bool GetAudioFrame(AudioFrame *pstFrame) {
     // This is due to the range of a period being from -1.0 to 1.0.
     s16Period += (u16Note * s32InvSampleRate + 0x3fff) >> 14;
   }
-
-  return TRUE;
 }
 
 static void ProcessAudioFrame(AudioFrame *pstFrame) {
