@@ -52,8 +52,8 @@ Includes
 #include "exceptions.h"
 #include "interrupts.h"
 
-#include "main.h"
 #include "typedefs.h"
+#include "main.h"
 #include "utilities.h"
 
 /* EIEF1-PCB-01 specific header files */

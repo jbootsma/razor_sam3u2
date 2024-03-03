@@ -1,3 +1,4 @@
+// clang-format off
 /*!**********************************************************************************************************************
 @file main.c
 @brief Main system file for the EiE firmware.
@@ -38,6 +39,8 @@ const u8 G_aau8AppShortNames[NUMBER_APPLICATIONS][MAX_TASK_NAME_SIZE] = {"LED", 
 /*--------------------------------------------------------------------------------------------------------------------*/
 /* External global variables defined in other files (must indicate which file
  * they are defined in) */
+
+extern u32 G_u32DebugFlags; // debug.c
 
 /***********************************************************************************************************************
 Global variable definitions with scope limited to this local application.
@@ -103,8 +106,14 @@ int main(void) {
 
   /* Super loop */
   while (1) {
+    static u32 u32DriverProfCtr = 0;
+    static u32 u32AppProfCtr = 0;
+    static u16 u16ProfFrameCtr = 1000;
+
     WATCHDOG_BONE();
     SystemTimeCheck();
+
+    u32 u32StartTick = (SysTick->VAL & SysTick_VAL_CURRENT_Msk) >> SysTick_VAL_CURRENT_Pos;
 
     /* Drivers */
     MessagingRunActiveState();
@@ -124,6 +133,8 @@ int main(void) {
     AntRunActiveState();
     AntApiRunActiveState();
 
+    u32 u32DriverDoneTick = (SysTick->VAL & SysTick_VAL_CURRENT_Msk) >> SysTick_VAL_CURRENT_Pos;
+
 #ifdef EIE_ASCII
 #endif /* EIE_ASCII */
 
@@ -131,10 +142,35 @@ int main(void) {
     CapTouchRunActiveState();
 #endif /* EIE_DOTMATRIX */
 
+
     /* Applications */
     UserApp1RunActiveState();
     UserApp2RunActiveState();
     UserApp3RunActiveState();
+
+    u32 u32AppDoneTick = (SysTick->VAL & SysTick_VAL_CURRENT_Msk) >> SysTick_VAL_CURRENT_Pos;
+
+    if (G_u32DebugFlags & _DEBUG_PROFILE_ENABLED) {
+      // These look backwards, it's because the systick timer is a down counter.
+      u32DriverProfCtr += u32StartTick - u32DriverDoneTick;
+      u32AppProfCtr += u32DriverDoneTick - u32AppDoneTick;
+
+      if (--u16ProfFrameCtr == 0) {
+        u16ProfFrameCtr = 1000;
+
+        // Divide by a factor of 10 instead of 1000, as it cancels a later multiply by 100.
+        u32DriverProfCtr = (u32DriverProfCtr + 5) / 10;
+        u32AppProfCtr = (u32AppProfCtr + 5) / 10;
+        DebugPrintf("Profile drivers=");
+        DebugPrintNumber((u32DriverProfCtr +  U32_SYSTICK_COUNT / 2) / U32_SYSTICK_COUNT);
+        DebugPrintf("%, apps=");
+        DebugPrintNumber((u32AppProfCtr + U32_SYSTICK_COUNT / 2) / U32_SYSTICK_COUNT);
+        DebugPrintf("%\r\n");
+
+        u32DriverProfCtr = 0;
+        u32AppProfCtr = 0;
+      }
+    }
 
     /* System sleep */
     HEARTBEAT_OFF();

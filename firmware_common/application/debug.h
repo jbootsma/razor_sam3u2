@@ -1,5 +1,6 @@
+// clang-format off
 /*!**********************************************************************************************************************
-@file debug.h                                                                
+@file debug.h
 @brief Header file for debug.c
 ***********************************************************************************************************************/
 
@@ -11,9 +12,9 @@
 Type Definitions
 **********************************************************************************************************************/
 
-/*! 
+/*!
 @struct DebugCommandType
-@brief Required members of a Debug command. 
+@brief Required members of a Debug command.
 */
 typedef struct
 {
@@ -27,7 +28,7 @@ typedef struct
 ***********************************************************************************************************************/
 
 /*------------------------------------------------------------------------------------------------------------------*/
-/*! @publicsection */                                                                                            
+/*! @publicsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 u32 DebugPrintf(u8* u8String_);
 void DebugLineFeed(void);
@@ -42,16 +43,16 @@ void SystemStatusReport(void);
 
 
 /*------------------------------------------------------------------------------------------------------------------*/
-/*! @protectedsection */                                                                                            
+/*! @protectedsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
-void DebugInitialize(void);                   
+void DebugInitialize(void);
 void DebugRunActiveState(void);
 
 void DebugRxCallback(void);
 
 
 /*------------------------------------------------------------------------------------------------------------------*/
-/*! @privatesection */                                                                                            
+/*! @privatesection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 inline static void AdvanceTokenCounter(void);
 
@@ -61,6 +62,7 @@ static void DebugCommandDummy(void);
 static void DebugCommandLedTestToggle(void);
 static void DebugLedTestCharacter(u8 u8Char_);
 static void DebugCommandSysTimeToggle(void);
+static void DebugCommandProfilePrints(void);
 
 #ifdef EIE_ASCII /* EIE_ASCII-specific debug functions */
 #endif /* EIE_ASCII */
@@ -73,9 +75,9 @@ static void DebugCommandCaptouchValuesToggle(void);
 /***********************************************************************************************************************
 * State Machine Declarations
 ***********************************************************************************************************************/
-static void DebugSM_Idle(void);                       
-static void DebugSM_CheckCmd(void);                   
-static void DebugSM_ProcessCmd(void);                 
+static void DebugSM_Idle(void);
+static void DebugSM_CheckCmd(void);
+static void DebugSM_ProcessCmd(void);
 
 static void DebugSM_Error(void);
 
@@ -93,6 +95,7 @@ static void DebugSM_Error(void);
 #define _DEBUG_LED_TEST_ENABLE         (u32)0x00000001      /*!< @brief G_u32DebugFlags set if LED test is enabled */
 #define _DEBUG_TIME_WARNING_ENABLE     (u32)0x00000002      /*!< @brief G_u32DebugFlags set if system time check is enabled */
 #define _DEBUG_PASSTHROUGH             (u32)0x00000004      /*!< @brief G_u32DebugFlags set if Passthrough mode is enabled */
+#define _DEBUG_PROFILE_ENABLED         (u32)0x00000008      /*!< @brief G_u32DebugFlags set if profiling message printing is enabled */
 
 #ifdef EIE_ASCII /* EIE_ASCII-specific G_u32DebugFlags flags */
 #endif /* EIE_ASCII */
@@ -128,7 +131,7 @@ static void DebugSM_Error(void);
 #define DEBUG_CMD_NAME00        "Show debug command list         "  /* Command 0: List all commands */
 #define DEBUG_CMD_NAME01        "Toggle LED test                 "  /* Command 1: Test that allows characters to toggle LEDs */
 #define DEBUG_CMD_NAME02        "Toggle system timing warning    "  /* Command 2: Prints message if system tick has advanced more than 1 between main loop sleeps (i.e. tasks are taking too long) */
-#define DEBUG_CMD_NAME03        "Dummy3                          "  /* Command 3: */
+#define DEBUG_CMD_NAME03        "Toggle profile prints           "  /* Command 3: Prints a message once per second summarizing tick usage for drivers and apps. */
 #define DEBUG_CMD_NAME04        "Dummy4                          "  /* Command 4: */
 #define DEBUG_CMD_NAME05        "Dummy5                          "  /* Command 5: */
 #define DEBUG_CMD_NAME06        "Dummy6                          "  /* Command 6: */
