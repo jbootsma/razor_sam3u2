@@ -79,14 +79,24 @@ static const s16 as16SinLut[65] = {0,     804,   1607,  2410,  3211,  4010,  480
 Private Function Prototypes
 **********************************************************************************************************************/
 #define MAX_SAMPLES 100
+#define NUM_FRAMES 3
 #define DEFAULT_SAMPLE_RATE 44100
 #define MAX_SAMPLE_RATE 96000
 #define MIN_SAMPLE_RATE 1000
 
 typedef struct {
+  DmaInfo stDma;
   u16 u16NumSamples;
   s16 as16Samples[MAX_SAMPLES];
+  bool bInUse;
 } AudioFrame;
+
+static AudioFrame astFrames[NUM_FRAMES];
+
+static struct {
+  AudioFrame *pstInFrame;
+  AudioFrame *pstOutFrame;
+} stPipeline;
 
 typedef enum {
   SRC_LOOPBACK,
@@ -116,10 +126,17 @@ static void SetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan);
 static void GetVolumeCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
 static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan);
 
-static bool GetAudioFrame(AudioFrame *pstFrame);
+static void ResetAudioFrame(AudioFrame *pstFrame);
+static AudioFrame *GetAvailableFrame(void);
+
+static void ProcessAudioPipeline(void);
+static void FlushOutFrame(void);
+static AudioFrame *PrepareOutFrame(void);
+static AudioFrame *GetInFrame(void);
+static AudioFrame *PrepareInFrame(void);
+
+static bool SetupUsbRead(AudioFrame *pstFrame);
 static void SynthAudioFrame(AudioFrame *pstFrame, SamplerFunc pfnSampler);
-static void ProcessAudioFrame(AudioFrame *pstFrame);
-static void SendAudioFrame(AudioFrame *pstFrame);
 
 static void ApplySampleRate(void);
 
@@ -202,7 +219,7 @@ void UserApp1RunActiveState(void) { UserApp1_pfStateMachine(); } /* end UserApp1
 #define _STRINGIFY(X) #X
 #define STRINGIFY(X) _STRINGIFY(X)
 
-static inline s16 tri_wave(s16 x_) {
+static inline s16 SampleTriangle(s16 x_) {
   s32 y = abs(x_) - 0x4000;
   // Rather than multiply by 2, use slightly less in order to avoid undefined
   // behaviour in the case where y = 0x4000.
@@ -212,7 +229,7 @@ static inline s16 tri_wave(s16 x_) {
 /// @brief fixed point sin function.
 ///
 /// Based on a 2-term taylor series expansion around points in a pre-computed lookup table.
-static inline s16 fix_sin(s16 x_) {
+static inline s16 SampleSin(s16 x_) {
   // Remap x from [-1.0, 1.0) into the equivalent period point within [0.0, 0.5]
   // Remember sign for later application.
   s32 s32sign = 1;
@@ -571,12 +588,14 @@ static const UsbEndpointConfigType astMainEpts[] = {
         .u8NumPackets = 2,
         .eXferType = USB_XFER_ISO,
         .eDir = USB_EPT_DIR_TO_HOST,
+        .bUseDma = TRUE,
     },
     {
         .u16MaxPacketSize = 256,
         .u8NumPackets = 2,
         .eXferType = USB_XFER_ISO,
         .eDir = USB_EPT_DIR_FROM_HOST,
+        .bUseDma = TRUE,
     },
 };
 
@@ -1109,31 +1128,148 @@ static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan) {
   UsbNextPacket(EPT_CTRL);
 }
 
-static bool GetAudioFrame(AudioFrame *pstFrame) {
+static void ResetAudioFrame(AudioFrame *pstFrame) {
+  pstFrame->bInUse = FALSE;
+  pstFrame->u16NumSamples = 0;
+  pstFrame->stDma = (DmaInfo){0};
+}
+
+static AudioFrame *GetAvailableFrame(void) {
+  for (u8 i = 0; i < NUM_FRAMES; i++) {
+    if (!astFrames[i].bInUse) {
+      astFrames[i].bInUse = TRUE;
+      return &astFrames[i];
+    }
+  }
+
+  return NULL;
+}
+
+static void ProcessAudioPipeline(void) {
+  FlushOutFrame();
+
+  if (!stPipeline.pstOutFrame) {
+    stPipeline.pstOutFrame = PrepareOutFrame();
+  }
+
+  if (!stPipeline.pstInFrame) {
+    stPipeline.pstInFrame = PrepareInFrame();
+  }
+}
+
+static void FlushOutFrame(void) {
+  if (!stPipeline.pstOutFrame) {
+    return;
+  }
+
+  if (stPipeline.pstOutFrame->stDma.eStatus != DMA_ACTIVE) {
+    ResetAudioFrame(stPipeline.pstOutFrame);
+    stPipeline.pstOutFrame = NULL;
+  }
+}
+
+static AudioFrame *PrepareOutFrame(void) {
+  AudioFrame *pstFrame = GetInFrame();
+  if (!pstFrame) {
+    return NULL;
+  }
+
+  if (stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_200_BYTES) {
+    ResetAudioFrame(pstFrame);
+    return NULL;
+  }
+
+  s16 s16VolumeMul = stUsb.bMuted ? 0 : stUsb.s16VolumeRaw;
+
+  for (int i = 0; i < pstFrame->u16NumSamples; i++) {
+    s32 s = pstFrame->as16Samples[i];
+    s = (s * s16VolumeMul) >> 15;
+    pstFrame->as16Samples[i] = s;
+  }
+
+  pstFrame->stDma = (DmaInfo){
+      .pvBuffer = &pstFrame->as16Samples,
+      .szXfer = pstFrame->u16NumSamples * sizeof(u16),
+  };
+
+  if (!UsbDmaWrite(EPT_AUDIO_OUT, &pstFrame->stDma)) {
+    ResetAudioFrame(pstFrame);
+    pstFrame = NULL;
+  }
+
+  return pstFrame;
+}
+
+static AudioFrame *GetInFrame(void) {
+  if (!stPipeline.pstInFrame) {
+    return NULL;
+  }
+
+  if (stPipeline.pstInFrame->stDma.eStatus == DMA_ACTIVE) {
+    return NULL;
+  }
+
+  AudioFrame *pstFrame = stPipeline.pstInFrame;
+  pstFrame->u16NumSamples = pstFrame->stDma.szXfer / sizeof(u16);
+
+  stPipeline.pstInFrame = NULL;
+  return pstFrame;
+}
+
+static AudioFrame *PrepareInFrame(void) {
+  AudioFrame *pstFrame = GetAvailableFrame();
+  if (!pstFrame) {
+    return NULL;
+  }
+
+  bool bSynthed = FALSE;
+
   switch (eSource) {
   case SRC_LOOPBACK:
-    if (!UsbIsPacketReady(EPT_AUDIO_IN)) {
-      return FALSE;
+    if (!SetupUsbRead(pstFrame)) {
+      ResetAudioFrame(pstFrame);
+      pstFrame = NULL;
     }
-
-    pstFrame->u16NumSamples = UsbRead(EPT_AUDIO_IN, pstFrame->as16Samples, sizeof(pstFrame->as16Samples));
-    pstFrame->u16NumSamples /= sizeof(s16);
-    UsbNextPacket(EPT_AUDIO_IN);
     break;
 
   case SRC_TRI_WAVE:
-    SynthAudioFrame(pstFrame, tri_wave);
+    bSynthed = TRUE;
+    SynthAudioFrame(pstFrame, SampleTriangle);
     break;
 
   case SRC_SIN_WAVE:
-    SynthAudioFrame(pstFrame, fix_sin);
+    bSynthed = TRUE;
+    SynthAudioFrame(pstFrame, SampleSin);
     break;
 
   default:
+    ResetAudioFrame(pstFrame);
+    pstFrame = NULL;
+    break;
+  }
+
+  if (bSynthed) {
+    // No actual DMA, so simulate it.
+    pstFrame->stDma = (DmaInfo){
+        .eStatus = DMA_COMPLETE,
+        .szXfer = pstFrame->u16NumSamples * sizeof(u16),
+    };
+  }
+
+  return pstFrame;
+}
+
+static bool SetupUsbRead(AudioFrame *pstFrame) {
+  if (stUsb.u8InAlt != IFACE_AUDIO_IN_ALT_200_BYTES) {
     return FALSE;
   }
 
-  return TRUE;
+  pstFrame->stDma = (DmaInfo){
+      .pvBuffer = pstFrame->as16Samples,
+      .szXfer = sizeof(pstFrame->as16Samples),
+  };
+
+  return UsbDmaRead(EPT_AUDIO_IN, &pstFrame->stDma);
 }
 
 static void SynthAudioFrame(AudioFrame *pstFrame, SamplerFunc pfnSampler) {
@@ -1169,29 +1305,6 @@ static void SynthAudioFrame(AudioFrame *pstFrame, SamplerFunc pfnSampler) {
     // This is due to the range of a period being from -1.0 to 1.0.
     s16Period += (u16Note * s32InvSampleRate + 0x3fff) >> 14;
   }
-}
-
-static void ProcessAudioFrame(AudioFrame *pstFrame) {
-  // TODO
-}
-
-static void SendAudioFrame(AudioFrame *pstFrame) {
-  if (stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_200_BYTES) {
-    return;
-  }
-
-  for (u8 u8Idx = 0; u8Idx < pstFrame->u16NumSamples; u8Idx++) {
-    s32 s32Sample = pstFrame->as16Samples[u8Idx];
-    if (stUsb.bMuted) {
-      s32Sample = 0;
-    } else {
-      s32Sample = (s32Sample * stUsb.s16VolumeRaw) / INT16_MAX;
-    }
-    pstFrame->as16Samples[u8Idx] = s32Sample;
-  }
-
-  UsbWrite(EPT_AUDIO_OUT, pstFrame->as16Samples, pstFrame->u16NumSamples * sizeof(pstFrame->as16Samples[0]));
-  UsbNextPacket(EPT_AUDIO_OUT);
 }
 
 static void ApplySampleRate(void) {
@@ -1235,13 +1348,7 @@ static void UserApp1SM_Idle(void) {
     bDisplayUpToDate = FALSE;
   }
 
-  AudioFrame stFrame;
-
-  if (GetAudioFrame(&stFrame)) {
-    ProcessAudioFrame(&stFrame);
-    SendAudioFrame(&stFrame);
-  }
-
+  ProcessAudioPipeline();
   UpdateDisplay();
 } /* end UserApp1SM_Idle() */
 

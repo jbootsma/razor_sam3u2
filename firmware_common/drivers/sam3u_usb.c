@@ -42,6 +42,9 @@ typedef struct {
   /// @brief Applied configuration for the endpoint.
   UsbEndpointConfigType stConfig;
 
+  /// @brief DMA packet in progress, or NULL if no transfer active.
+  DmaInfo *pstDma;
+
   /// @brief Offset into the active packet (if there is one).
   u16 u16Offset;
 
@@ -65,12 +68,9 @@ typedef struct {
 /// @brief The maximum possible sizes that can be used with each endpoint
 /// according to the data sheet.
 static const EndptLimitsType astLimits[USB_NUM_EPS] = {
-    {.u16PacketSize = 64, .u8NumPackets = 1},
-    {.u16PacketSize = 512, .u8NumPackets = 2},
-    {.u16PacketSize = 512, .u8NumPackets = 2},
-    {.u16PacketSize = 64, .u8NumPackets = 3},
-    {.u16PacketSize = 64, .u8NumPackets = 3},
-    {.u16PacketSize = 1024, .u8NumPackets = 3},
+    {.u16PacketSize = 64, .u8NumPackets = 1},   {.u16PacketSize = 512, .u8NumPackets = 2},
+    {.u16PacketSize = 512, .u8NumPackets = 2},  {.u16PacketSize = 64, .u8NumPackets = 3},
+    {.u16PacketSize = 64, .u8NumPackets = 3},   {.u16PacketSize = 1024, .u8NumPackets = 3},
     {.u16PacketSize = 1024, .u8NumPackets = 3},
 };
 
@@ -134,9 +134,7 @@ static u8 u8NewAddress;
 
 /// @brief Get the start of the memory window used to access an endpoint's FIFO
 /// memory.
-static inline void *GetFifoPtr(u8 u8Endpt_) {
-  return (void *)(FIFO_MAP_BASE + FIFO_CHANNEL_SZ * u8Endpt_);
-}
+static inline void *GetFifoPtr(u8 u8Endpt_) { return (void *)(FIFO_MAP_BASE + FIFO_CHANNEL_SZ * u8Endpt_); }
 
 static inline u16 RegFieldToSize(u8 u8Field_) { return 8u << u8Field_; }
 
@@ -164,6 +162,7 @@ static bool HandleUsbReset(void);
 static void ConfigEpt(u8 u8Endpt_, const UsbEndpointConfigType *pstCfg_);
 static void ResetEpt(u8 u8Endpt_);
 static void UpdateReadyState(u8 u8Endpt_);
+static void CompleteDma(u8 u8Endpt_, DmaStatus eStatus);
 
 static void ServiceControlPipe(void);
 static void StartNewRequest(void);
@@ -215,9 +214,7 @@ bool UsbSetDriverConfig(const UsbDriverConfigType *pstConfig_) {
 
   const char *pcErr = NULL;
   if (!UsbValidateEndpoints(&pstConfig_->stFullSpeedEp0Cfg, 0, NULL, &pcErr) ||
-      (pstConfig_->bHighSpeedEnabled &&
-       !UsbValidateEndpoints(&pstConfig_->stHighSpeedEp0Cfg, 0, NULL,
-                             &pcErr))) {
+      (pstConfig_->bHighSpeedEnabled && !UsbValidateEndpoints(&pstConfig_->stHighSpeedEp0Cfg, 0, NULL, &pcErr))) {
 
     DebugPrintf("Ignoring USB driver config with invalid EP0: ");
     DebugPrintf((u8 *)pcErr);
@@ -234,10 +231,8 @@ bool UsbSetDriverConfig(const UsbDriverConfigType *pstConfig_) {
   return TRUE;
 }
 
-bool UsbValidateEndpoints(const UsbEndpointConfigType *pstEp0Cfg_,
-                          u8 u8NumExtraEndpoints_,
-                          const UsbEndpointConfigType *astConfigs_,
-                          const char **ppcErrorStrOut_) {
+bool UsbValidateEndpoints(const UsbEndpointConfigType *pstEp0Cfg_, u8 u8NumExtraEndpoints_,
+                          const UsbEndpointConfigType *astConfigs_, const char **ppcErrorStrOut_) {
   // Avoid needing to do null checks at every error point.
   const char *dummy;
   if (ppcErrorStrOut_ == NULL) {
@@ -276,6 +271,11 @@ bool UsbValidateEndpoints(const UsbEndpointConfigType *pstEp0Cfg_,
         *ppcErrorStrOut_ = "EP0 cannot be 0-sized";
         return FALSE;
       }
+
+      if (pstCfg->bUseDma) {
+        *ppcErrorStrOut_ = "EP0 cannot use DMA";
+        return FALSE;
+      }
     } else {
       if (pstCfg->eXferType == USB_XFER_CTRL) {
         *ppcErrorStrOut_ = "Non-default control pipe not supported";
@@ -307,8 +307,7 @@ bool UsbValidateEndpoints(const UsbEndpointConfigType *pstEp0Cfg_,
   return TRUE;
 }
 
-bool UsbSetEndpointsConfig(u8 u8NumExtraEndpoints_,
-                           const UsbEndpointConfigType *astConfigs_) {
+bool UsbSetEndpointsConfig(u8 u8NumExtraEndpoints_, const UsbEndpointConfigType *astConfigs_) {
   const char *pcErr = NULL;
 
   if (!UsbIsEnabled()) {
@@ -316,12 +315,10 @@ bool UsbSetEndpointsConfig(u8 u8NumExtraEndpoints_,
     return FALSE;
   }
 
-  const UsbEndpointConfigType *pstEp0 = UsbIsHighSpeed()
-                                            ? &pstDriverCfg->stHighSpeedEp0Cfg
-                                            : &pstDriverCfg->stFullSpeedEp0Cfg;
+  const UsbEndpointConfigType *pstEp0 =
+      UsbIsHighSpeed() ? &pstDriverCfg->stHighSpeedEp0Cfg : &pstDriverCfg->stFullSpeedEp0Cfg;
 
-  if (!UsbValidateEndpoints(pstEp0, u8NumExtraEndpoints_, astConfigs_,
-                            &pcErr)) {
+  if (!UsbValidateEndpoints(pstEp0, u8NumExtraEndpoints_, astConfigs_, &pcErr)) {
     DebugPrintf("Unable to apply endpoint config: ");
     DebugPrintf((u8 *)pcErr);
     DebugLineFeed();
@@ -387,8 +384,7 @@ u16 UsbGetFrame(void) {
     return 0;
   }
 
-  return (UDPHS->UDPHS_FNUM & UDPHS_FNUM_FRAME_NUMBER_Msk) >>
-         UDPHS_FNUM_FRAME_NUMBER_Pos;
+  return (UDPHS->UDPHS_FNUM & UDPHS_FNUM_FRAME_NUMBER_Msk) >> UDPHS_FNUM_FRAME_NUMBER_Pos;
 }
 
 bool UsbSetStall(u8 u8Endpt_, bool bIsStalling_) {
@@ -437,6 +433,10 @@ u16 UsbWrite(u8 u8Endpt_, const void *pvSrc_, u16 u16MaxLen_) {
 
   EndptStateType *pstEpt = &astEndpts[u8Endpt_];
 
+  if (pstEpt->stConfig.bUseDma) {
+    return 0;
+  }
+
   if (!pstEpt->bIsReady || (pstEpt->stConfig.eDir != USB_EPT_DIR_TO_HOST)) {
     return 0;
   }
@@ -456,12 +456,61 @@ u16 UsbWrite(u8 u8Endpt_, const void *pvSrc_, u16 u16MaxLen_) {
   return u16ChunkSz;
 }
 
+bool UsbDmaWrite(u8 u8Endpt_, DmaInfo *pstDma_) {
+  if (u8Endpt_ >= USB_NUM_EPS) {
+    return FALSE;
+  }
+
+  if (pstDma_ == NULL) {
+    return FALSE;
+  }
+
+  if (pstDma_->szXfer > UINT16_MAX) {
+    return FALSE;
+  }
+
+  EndptStateType *pstEpt = &astEndpts[u8Endpt_];
+
+  if (!pstEpt->stConfig.bUseDma) {
+    return FALSE;
+  }
+
+  if (pstEpt->stConfig.eDir != USB_EPT_DIR_TO_HOST) {
+    return FALSE;
+  }
+
+  // Need to atomically claim the DMA transfer, to make this function re-entrant safe.
+  __disable_irq();
+  if (pstEpt->pstDma) {
+    __enable_irq();
+    return FALSE;
+  }
+  pstEpt->pstDma = pstDma_;
+  __enable_irq();
+
+  pstEpt->pstDma = pstDma_;
+  UdphsDma *pstDmaRegs = &UDPHS->UDPHS_DMA[u8Endpt_];
+
+  pstDma_->eStatus = DMA_ACTIVE;
+  pstDmaRegs->UDPHS_DMAADDRESS = (u32)pstDma_->pvBuffer;
+  // Locked transfers might interfere with user code, due to sharing the same AHB slave (the RAM). For this reason the
+  // burst lock is not enabled.
+  pstDmaRegs->UDPHS_DMACONTROL = UDPHS_DMACONTROL_CHANN_ENB | UDPHS_DMACONTROL_END_B_EN | UDPHS_DMACONTROL_END_TR_IT |
+                                 UDPHS_DMACONTROL_END_BUFFIT | UDPHS_DMACONTROL_BUFF_LENGTH(pstDma_->szXfer);
+
+  return TRUE;
+}
+
 u16 UsbRead(u8 u8Endpt_, void *pvDst_, u16 u16MaxLen_) {
   if (u8Endpt_ >= USB_NUM_EPS) {
     return FALSE;
   }
 
   EndptStateType *pstEpt = &astEndpts[u8Endpt_];
+
+  if (pstEpt->stConfig.bUseDma) {
+    return 0;
+  }
 
   if (!pstEpt->bIsReady || (pstEpt->stConfig.eDir != USB_EPT_DIR_FROM_HOST)) {
     return 0;
@@ -482,6 +531,83 @@ u16 UsbRead(u8 u8Endpt_, void *pvDst_, u16 u16MaxLen_) {
   return u16ChunkSz;
 }
 
+bool UsbDmaRead(u8 u8Endpt_, DmaInfo *pstDma_) {
+  if (u8Endpt_ >= USB_NUM_EPS) {
+    return FALSE;
+  }
+
+  if (pstDma_ == NULL) {
+    return FALSE;
+  }
+
+  if (pstDma_->szXfer > UINT16_MAX) {
+    return FALSE;
+  }
+
+  EndptStateType *pstEpt = &astEndpts[u8Endpt_];
+
+  if (!pstEpt->stConfig.bUseDma) {
+    return FALSE;
+  }
+
+  if (pstEpt->stConfig.eDir != USB_EPT_DIR_FROM_HOST) {
+    return FALSE;
+  }
+
+  __disable_irq();
+  if (pstEpt->pstDma) {
+    __enable_irq();
+    return FALSE;
+  }
+  pstEpt->pstDma = pstDma_;
+  __enable_irq();
+
+  pstEpt->pstDma = pstDma_;
+  UdphsDma *pstDmaRegs = &UDPHS->UDPHS_DMA[u8Endpt_];
+
+  pstDma_->eStatus = DMA_ACTIVE;
+  pstDmaRegs->UDPHS_DMAADDRESS = (u32)pstDma_->pvBuffer;
+  pstDmaRegs->UDPHS_DMACONTROL = UDPHS_DMACONTROL_CHANN_ENB | UDPHS_DMACONTROL_END_TR_EN | UDPHS_DMACONTROL_END_B_EN |
+                                 UDPHS_DMACONTROL_END_TR_IT | UDPHS_DMACONTROL_END_BUFFIT |
+                                 UDPHS_DMACONTROL_BUFF_LENGTH(pstDma_->szXfer);
+
+  return TRUE;
+}
+
+void UsbCancelDma(u8 u8Endpt_) {
+  if (u8Endpt_ > USB_NUM_EPS) {
+    return;
+  }
+
+  EndptStateType *pstEpt = &astEndpts[u8Endpt_];
+  if (!pstEpt->stConfig.bUseDma) {
+    return;
+  }
+
+  UdphsDma *pstDmaRegs = &UDPHS->UDPHS_DMA[u8Endpt_];
+  UdphsEpt *pstRegs = &UDPHS->UDPHS_EPT[u8Endpt_];
+  pstDmaRegs->UDPHS_DMACONTROL = 0; // Abort in hardware.
+
+  // Cleanup any partial transaction. Reading status bits clears them.
+  u32 u32Status = pstDmaRegs->UDPHS_DMASTATUS;
+  if (!(u32Status & UDPHS_DMASTATUS_END_TR_ST) && pstEpt->pstDma) {
+    // Transaction didn't end normally, see if one was started. There's a small race here with a new packet being made
+    // available between us stopping the DMA and checking, but for the API user that's indistinguisable from stopping a
+    // DMA transfer that was started but hadn't transferred a byte yet.
+
+    if (pstRegs->UDPHS_EPTSTA & UDPHS_EPTSTA_BYTE_COUNT_Msk) {
+      if (pstEpt->stConfig.eDir == USB_EPT_DIR_TO_HOST) {
+        pstRegs->UDPHS_EPTSETSTA = UDPHS_EPTSETSTA_RXRDY_TXKL;
+      } else {
+        pstRegs->UDPHS_EPTCLRSTA = UDPHS_EPTCLRSTA_RXRDY_TXKL;
+      }
+    }
+
+    // Can finally signal the user code that the DMA was aborted.
+    CompleteDma(u8Endpt_, DMA_ABORTED);
+  }
+}
+
 bool UsbNextPacket(u8 u8Endpt_) {
   if (u8Endpt_ >= USB_NUM_EPS) {
     return FALSE;
@@ -491,7 +617,7 @@ bool UsbNextPacket(u8 u8Endpt_) {
   EndptStateType *pstState = &astEndpts[u8Endpt_];
   bool bFinishRequest = FALSE;
 
-  if (!pstState->bIsReady) {
+  if (!pstState->bIsReady || pstState->stConfig.bUseDma) {
     return FALSE;
   }
 
@@ -506,13 +632,11 @@ bool UsbNextPacket(u8 u8Endpt_) {
         bFinishRequest = TRUE;
       } else {
         // Make sure the request offset reflects the skipped data.
-        stRequest.stStatus.u16RequestOffset +=
-            pstState->u16PktSize - pstState->u16Offset;
+        stRequest.stStatus.u16RequestOffset += pstState->u16PktSize - pstState->u16Offset;
       }
     }
 
-    if (stRequest.stStatus.u16RequestOffset ==
-        stRequest.stStatus.stHeader.u16Length) {
+    if (stRequest.stStatus.u16RequestOffset == stRequest.stStatus.stHeader.u16Length) {
       // All data consumed, this request is finished.
       bFinishRequest = TRUE;
     }
@@ -579,9 +703,7 @@ const UsbSetupPacketType *UsbGetCurrentRequest(void) {
   return NULL;
 }
 
-bool UsbAcceptRequest(UsbRequestHandlerCb fnRequestHandler_,
-                      UsbRequestCleanupCb fnRequestCleanup_,
-                      void *pvUserData_) {
+bool UsbAcceptRequest(UsbRequestHandlerCb fnRequestHandler_, UsbRequestCleanupCb fnRequestCleanup_, void *pvUserData_) {
   if (fnRequestHandler_ == NULL) {
     return FALSE;
   }
@@ -610,8 +732,7 @@ void UsbFailRequest(void) {
 void UDPD_IrqHandler(void) {
   if (UDPHS->UDPHS_INTSTA & UDPHS_INTSTA_INT_SOF) {
     UDPHS->UDPHS_CLRINT = UDPHS_CLRINT_INT_SOF;
-    u32 u32Now =
-        (SysTick->VAL & SysTick_VAL_CURRENT_Msk) >> SysTick_VAL_CURRENT_Pos;
+    u32 u32Now = (SysTick->VAL & SysTick_VAL_CURRENT_Msk) >> SysTick_VAL_CURRENT_Pos;
 
     // Make sys tick lag the actual SOF, should ensure that packets are
     // definitely ready by the time user code runs.
@@ -623,6 +744,20 @@ void UDPD_IrqHandler(void) {
   if (UDPHS->UDPHS_INTSTA & UDPHS_INTSTA_ENDRESET) {
     bResetEvt = TRUE;
     UDPHS->UDPHS_CLRINT = UDPHS_CLRINT_ENDRESET;
+  }
+
+  for (u8 dmaIdx = 0; dmaIdx < UDPHSDMA_NUMBER; dmaIdx++) {
+    u32 u32Mask = UDPHS_INTSTA_DMA_1 << dmaIdx;
+
+    if (UDPHS->UDPHS_INTSTA & u32Mask) {
+      UDPHS->UDPHS_CLRINT = u32Mask;
+      u16 u16Rem = (UDPHS->UDPHS_DMA[dmaIdx + 1].UDPHS_DMASTATUS & UDPHS_DMASTATUS_BUFF_COUNT_Msk) >>
+                   UDPHS_DMASTATUS_BUFF_COUNT_Pos;
+      astEndpts[dmaIdx + 1].pstDma->szXfer -= u16Rem;
+      astEndpts[dmaIdx + 1].bIsReady = FALSE;
+
+      CompleteDma(dmaIdx + 1, DMA_COMPLETE);
+    }
   }
 }
 
@@ -712,9 +847,8 @@ static bool HandleUsbReset(void) {
   // timer.
   UDPHS->UDPHS_IEN = UDPHS_IEN_INT_SOF;
 
-  const UsbEndpointConfigType *pstCfg = UsbIsHighSpeed()
-                                            ? &pstDriverCfg->stHighSpeedEp0Cfg
-                                            : &pstDriverCfg->stFullSpeedEp0Cfg;
+  const UsbEndpointConfigType *pstCfg =
+      UsbIsHighSpeed() ? &pstDriverCfg->stHighSpeedEp0Cfg : &pstDriverCfg->stFullSpeedEp0Cfg;
   ConfigEpt(USB_DEF_CTRL_EP, pstCfg);
 
   pstDriverCfg->pfnEventHandler(USB_EVT_RESET);
@@ -742,6 +876,11 @@ static void ConfigEpt(u8 u8Endpt_, const UsbEndpointConfigType *pstCfg_) {
 
   pstEpt->UDPHS_EPTCFG = u32Reg;
 
+  if (pstCfg_->bUseDma) {
+    pstEpt->UDPHS_EPTCTLENB = UDPHS_EPTCTLENB_AUTO_VALID;
+    UDPHS->UDPHS_IEN |= UDPHS_IEN_DMA_1 << (u8Endpt_ - 1);
+  }
+
   if (pstCfg_->u8NumPackets) {
     pstEpt->UDPHS_EPTCTLENB = UDPHS_EPTCTLENB_EPT_ENABL;
   }
@@ -757,6 +896,16 @@ static void ResetEpt(u8 u8Endpt_) {
   pstEpt->UDPHS_EPTCFG = 0;
 
   memset(pstState, 0, sizeof(*pstState));
+
+  if (u8Endpt_ > 0) {
+    UdphsDma *pstDma = &UDPHS->UDPHS_DMA[u8Endpt_];
+    pstDma->UDPHS_DMACONTROL = 0;
+    pstDma->UDPHS_DMAADDRESS = 0;
+    pstDma->UDPHS_DMANXTDSC = 0;
+    pstDma->UDPHS_DMASTATUS = pstDma->UDPHS_DMASTATUS; // Recommended method to clear-by-read from the data sheet.
+
+    CompleteDma(u8Endpt_, DMA_ABORTED);
+  }
 }
 
 /// @brief Update the ready status of an ednpoint based on the state reflected
@@ -765,32 +914,42 @@ static void UpdateReadyState(u8 u8Endpt_) {
   UdphsEpt *pstEpt = &UDPHS->UDPHS_EPT[u8Endpt_];
   EndptStateType *pstState = &astEndpts[u8Endpt_];
 
-  if (pstState->bIsReady) {
-    // If the endpoint was already ready there's nothing to do.
+  if (pstState->bIsReady || pstState->pstDma != NULL) {
+    // Either the endpoint is already ready, or a DMA is still in progress that needs to be waited for.
     return;
   }
 
   // Careful, TXRDY being set actually means all tx buffers are used/busy.
-  if ((pstState->stConfig.eDir == USB_EPT_DIR_TO_HOST) &&
-      !(pstEpt->UDPHS_EPTSTA & UDPHS_EPTSTA_TXRDY)) {
+  if ((pstState->stConfig.eDir == USB_EPT_DIR_TO_HOST) && !(pstEpt->UDPHS_EPTSTA & UDPHS_EPTSTA_TXRDY)) {
     pstState->bIsReady = TRUE;
     pstState->u16PktSize = pstState->stConfig.u16MaxPacketSize;
 
     if (u8Endpt_ == USB_DEF_CTRL_EP) {
-      u16 u16Remain = stRequest.stStatus.stHeader.u16Length -
-                      stRequest.stStatus.u16RequestOffset;
+      u16 u16Remain = stRequest.stStatus.stHeader.u16Length - stRequest.stStatus.u16RequestOffset;
       if (u16Remain < pstState->u16PktSize) {
         pstState->u16PktSize = u16Remain;
       }
     }
   }
 
-  if ((pstState->stConfig.eDir == USB_EPT_DIR_FROM_HOST) &&
-      (pstEpt->UDPHS_EPTSTA & UDPHS_EPTSTA_RXRDY_TXKL)) {
+  if ((pstState->stConfig.eDir == USB_EPT_DIR_FROM_HOST) && (pstEpt->UDPHS_EPTSTA & UDPHS_EPTSTA_RXRDY_TXKL)) {
     pstState->bIsReady = TRUE;
-    pstState->u16PktSize =
-        (pstEpt->UDPHS_EPTSTA & UDPHS_EPTSTA_BYTE_COUNT_Msk) >>
-        UDPHS_EPTSTA_BYTE_COUNT_Pos;
+    pstState->u16PktSize = (pstEpt->UDPHS_EPTSTA & UDPHS_EPTSTA_BYTE_COUNT_Msk) >> UDPHS_EPTSTA_BYTE_COUNT_Pos;
+  }
+}
+
+static void CompleteDma(u8 u8Endpt_, DmaStatus eStatus) {
+  EndptStateType *pstEpt = &astEndpts[u8Endpt_];
+  if (!pstEpt->pstDma) {
+    return;
+  }
+
+  DmaInfo *pstDma = pstEpt->pstDma;
+  pstEpt->pstDma = NULL;
+  pstDma->eStatus = eStatus;
+
+  if (pstDma->OnCompleteCb) {
+    pstDma->OnCompleteCb(pstDma);
   }
 }
 
@@ -808,8 +967,7 @@ static void ServiceControlPipe(void) {
   if (bAddressPending && !(pstEpt->UDPHS_EPTSTA & UDPHS_EPTSTA_TXRDY)) {
     // Can apply the address change now as the status packet is done sending.
     UDPHS->UDPHS_CTRL &= ~(UDPHS_CTRL_DEV_ADDR_Msk | UDPHS_CTRL_FADDR_EN);
-    UDPHS->UDPHS_CTRL |=
-        UDPHS_CTRL_DEV_ADDR(u8NewAddress) | UDPHS_CTRL_FADDR_EN;
+    UDPHS->UDPHS_CTRL |= UDPHS_CTRL_DEV_ADDR(u8NewAddress) | UDPHS_CTRL_FADDR_EN;
     bAddressPending = FALSE;
   }
 

@@ -12,6 +12,19 @@
 Type Definitions
 ***********************************************************************************************************************/
 
+typedef enum {
+  DMA_COMPLETE,
+  DMA_ABORTED,
+  DMA_ACTIVE,
+} DmaStatus;
+
+typedef struct DmaInfo {
+  void *pvBuffer;
+  size_t szXfer;
+  volatile DmaStatus eStatus;
+  void (*OnCompleteCb)(struct DmaInfo *pstDma_);
+} DmaInfo;
+
 /***********************************************************************************************************************
 Constants / Definitions
 ***********************************************************************************************************************/

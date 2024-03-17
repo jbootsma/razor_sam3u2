@@ -235,6 +235,11 @@ typedef struct {
 
   /// @brief Direction of data transfers on this endpoint.
   UsbEptDirType eDir;
+
+  /// @brief If true use DMA transfers on this endpoint.
+  /// Not possible for EP0. If set must use UsbDmaRead() and UsbDmaWrite()
+  /// instead of UsbRead() and UsbWrite().
+  bool bUseDma;
 } UsbEndpointConfigType;
 
 /// @brief Configuration for the USB driver.
@@ -363,12 +368,39 @@ bool UsbIsStalling(u8 u8Endpt_);
 u16 UsbWrite(u8 u8Endpt_, const void *pvSrc_, u16 u16MaxLen_);
 
 /**
+ * @brief Queue the DMA transfer of a packet for an IN endpoint.
+ *
+ * The endpoint must be configured to use DMA transfers. It is assumed that the single transfer includes the entire
+ * packet.
+ *
+ * @return TRUE if the packet was succesfully queued. FALSE otherwise (likely a previous xfer was still in progress)
+ */
+bool UsbDmaWrite(u8 u8Endpt_, DmaInfo *pstDma_);
+
+/**
  * @brief Read some data from the current packet on an OUT endpoint.
  *
  * @return The actual number of byte read. May be 0 if there was an error but
  * could also mean that the current packet was already fully consumed.
  */
 u16 UsbRead(u8 u8Endpt_, void *pvDst_, u16 u16MaxLen_);
+
+/**
+ * @brief Queue a DMA transfer of a packet for an OUT endpoint.
+ *
+ * The endpoint must be configured to use DMA transfers. It is assumed that the single transfer includes the entire
+ * packet.
+ *
+ * @post After the transfer is complete the size field of the transfer will reflect the actual number of bytes received.
+ *
+ * @return TRUE if the packet was succesfully queued. FALSE otherwise.
+ */
+bool UsbDmaRead(u8 u8Endpt_, DmaInfo *pstDma_);
+
+/**
+ * @brief Cancel any queued DMA transfer for the endpoint.
+ */
+void UsbCancelDma(u8 u8Endpt_);
 
 /**
  * @brief Indicate that the application is done processing the current packet,
@@ -395,6 +427,8 @@ bool UsbNextPacket(u8 u8Endpt_);
  * For OUT endpoints this means there's a received packet available for
  * reading. It will be discarded when UsbNextPacket() is called to make room
  * for more transfers from the host.
+ *
+ * If the endpoint has DMA enabled this indicates whether a packet could be queued immediately.
  */
 bool UsbIsPacketReady(u8 u8Endpt_);
 
@@ -419,6 +453,8 @@ u16 UsbGetPktSize(u8 u8Endpt_);
  * For OUT endpoints it's the amount of data read from the packet so far.
  *
  * For IN endpoints it's the amount of data written to the packet so far.
+ *
+ * If the endpoint uses DMA this will always be 0.
  */
 u16 UsbGetPktOffset(u8 u8Endpt_);
 
