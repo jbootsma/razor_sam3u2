@@ -899,6 +899,8 @@ typedef struct __attribute__((packed)) {
 #define USB_PROTO_AUDIO_UNDEF 0x00
 #define USB_PROTO_AUDIO_VERSION_02_00 0x20
 
+#define USB_AUDIO_VOLUME_SILENT INT16_MIN
+
 #define USB_AUDIO_FUNC_CLASS                                                                                           \
   (UsbClassType) { USB_BASE_CLASS_AUDIO, USB_SUBCLASS_AUDIO_UNDEF, USB_PROTO_AUDIO_VERSION_02_00 }
 

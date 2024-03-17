@@ -617,7 +617,7 @@ static void UpdateDisplay(void) {
     return;
   }
 
-  u8KeepOut = 50;
+  u8KeepOut = 200;
   bDisplayUpToDate = TRUE;
 
   LcdCommand(LCD_HOME_CMD);
@@ -659,7 +659,7 @@ static void UpdateDisplay(void) {
   if (stUsb.bMuted) {
     pcVol = "M";
   } else {
-    if (stUsb.s16VolumeUsb == 0) {
+    if (stUsb.s16VolumeUsb == USB_AUDIO_VOLUME_SILENT) {
       pcVol = "-inf dB";
     } else {
       // newlib-nano doesn't support %f in printf, so manually break down
@@ -1072,7 +1072,7 @@ static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan) {
       return;
     }
 
-    if (stUsb.s16VolumeUsb == INT16_MIN) {
+    if (stUsb.s16VolumeUsb == USB_AUDIO_VOLUME_SILENT) {
       stUsb.s16VolumeRaw = 0;
     } else {
       s16 s16Idx = stUsb.s16VolumeUsb / 9;
