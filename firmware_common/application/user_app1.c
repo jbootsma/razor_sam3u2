@@ -832,6 +832,7 @@ static void OnStandardUsbRequest(const UsbSetupPacketType *pstRequest) {
           stUsb.u8OutAlt = (u8)pstRequest->u16Value;
           bDisplayUpToDate = FALSE;
           UsbNextPacket(EPT_CTRL);
+          UsbCancelDma(EPT_AUDIO_OUT);
         }
         break;
 
@@ -840,6 +841,7 @@ static void OnStandardUsbRequest(const UsbSetupPacketType *pstRequest) {
           stUsb.u8InAlt = (u8)pstRequest->u16Value;
           bDisplayUpToDate = FALSE;
           UsbNextPacket(EPT_CTRL);
+          UsbCancelDma(EPT_AUDIO_IN);
         }
         break;
       }
@@ -1210,9 +1212,15 @@ static AudioFrame *GetInFrame(void) {
   }
 
   AudioFrame *pstFrame = stPipeline.pstInFrame;
-  pstFrame->u16NumSamples = pstFrame->stDma.szXfer / sizeof(u16);
-
   stPipeline.pstInFrame = NULL;
+
+  if (pstFrame->stDma.eStatus == DMA_COMPLETE) {
+    pstFrame->u16NumSamples = pstFrame->stDma.szXfer / sizeof(u16);
+  } else {
+    ResetAudioFrame(pstFrame);
+    pstFrame = NULL;
+  }
+
   return pstFrame;
 }
 
@@ -1261,7 +1269,15 @@ static AudioFrame *PrepareInFrame(void) {
 
 static bool SetupUsbRead(AudioFrame *pstFrame) {
   if (stUsb.u8InAlt != IFACE_AUDIO_IN_ALT_200_BYTES) {
-    return FALSE;
+    // If the host isn't actively feeding in data treat it the same as getting silence.
+    pstFrame->u16NumSamples = u16FrameLen;
+    memset(pstFrame->as16Samples, 0, sizeof(u16) * pstFrame->u16NumSamples);
+
+    pstFrame->stDma = (DmaInfo){
+        .szXfer = pstFrame->u16NumSamples * sizeof(u16),
+        .eStatus = DMA_COMPLETE,
+    };
+    return TRUE;
   }
 
   pstFrame->stDma = (DmaInfo){
@@ -1276,17 +1292,38 @@ static void SynthAudioFrame(AudioFrame *pstFrame, SamplerFunc pfnSampler) {
   static u16 u16FrameErrAccum = 0;
   static s16 s16Period = 0;
 
-  static const u16 u16Notes[] = {
-      C4, C4S, D4, D4S, E4, F4, F4S, G4, G4S, A4, A4S, B4,
+  // clang-format off
+  static const u16 au16Notes[] = {
+     D3, A3, D4,
+     F4, D4, A3,
+     E4, F4, D4,
+     F4, D4, A3,
+
+     E3, A3, C4,
+     E4, C4, A3,
+     A4, E4, C4,
+     E4, C4, A3,
+
+     D3, A3, D4,
+     F4, D4, A3,
+     E4, F4, D4,
+     F4, D4, A3,
+
+     F3, A3, D4, F4, D4, A3,
+     D3S, G3, C4, D4S, C4, G3,
   };
+  // clang-format on
+  static const u32 u32Notecount = sizeof(au16Notes) / sizeof(au16Notes[0]);
   static u32 u32NoteIdx = 0;
   static u8 u8FrameCtr = 250;
 
   if (--u8FrameCtr == 0) {
     u8FrameCtr = 250;
-    u32NoteIdx++;
+    if (++u32NoteIdx == u32Notecount) {
+      u32NoteIdx = 0;
+    }
   }
-  u16 u16Note = u16Notes[u32NoteIdx % 12];
+  u16 u16Note = au16Notes[u32NoteIdx];
 
   pstFrame->u16NumSamples = u16FrameLen;
   u16FrameErrAccum += u16FrameRem;
