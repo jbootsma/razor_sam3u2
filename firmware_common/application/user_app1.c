@@ -134,6 +134,7 @@ static void FlushOutFrame(void);
 static AudioFrame *PrepareOutFrame(void);
 static AudioFrame *GetInFrame(void);
 static AudioFrame *PrepareInFrame(void);
+static void ProcessAudioFrame(AudioFrame *pstFrame);
 
 static bool SetupUsbRead(AudioFrame *pstFrame);
 static void SynthAudioFrame(AudioFrame *pstFrame, SamplerFunc pfnSampler);
@@ -1176,17 +1177,11 @@ static AudioFrame *PrepareOutFrame(void) {
     return NULL;
   }
 
+  ProcessAudioFrame(pstFrame);
+
   if (stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_200_BYTES) {
     ResetAudioFrame(pstFrame);
     return NULL;
-  }
-
-  s16 s16VolumeMul = stUsb.bMuted ? 0 : stUsb.s16VolumeRaw;
-
-  for (int i = 0; i < pstFrame->u16NumSamples; i++) {
-    s32 s = pstFrame->as16Samples[i];
-    s = (s * s16VolumeMul) >> 15;
-    pstFrame->as16Samples[i] = s;
   }
 
   pstFrame->stDma = (DmaInfo){
@@ -1265,6 +1260,61 @@ static AudioFrame *PrepareInFrame(void) {
   }
 
   return pstFrame;
+}
+
+static void ProcessAudioFrame(AudioFrame *pstFrame) {
+  static u16 au16Energies[16];
+  static const u8 u8NumEnergies = sizeof(au16Energies) / sizeof(au16Energies[0]);
+  static u8 u8Idx;
+
+  u32 u32Energy = 0;
+  s16 s16VolumeMul = stUsb.bMuted ? 0 : stUsb.s16VolumeRaw;
+
+  for (int i = 0; i < pstFrame->u16NumSamples; i++) {
+    s32 s = pstFrame->as16Samples[i];
+    s = (s * s16VolumeMul) >> 15;
+    pstFrame->as16Samples[i] = s;
+
+    u32Energy += abs(s);
+  }
+
+  au16Energies[u8Idx++] = u32Energy / pstFrame->u16NumSamples;
+  if (u8Idx == u8NumEnergies) {
+    u8Idx = 0;
+  }
+
+  u32Energy = 0;
+  for (u8 i = 0; i < u8NumEnergies; i++) {
+    u32Energy += au16Energies[i];
+  }
+  u32Energy /= u8NumEnergies;
+
+  // clang-format off
+  static const struct {
+    LedNameType eLed;
+    u16 u16Threshold;
+  } astThresholds[] = {
+      {WHITE,     0x6000},
+      {PURPLE,    0x34f2},
+      {BLUE,      0x1d33},
+      {CYAN,      0x101a},
+      {GREEN,     0x08e1},
+      {YELLOW,    0x04e6},
+      {ORANGE,    0x02b3},
+      {RED,       0x017d},
+      {LCD_BLUE,  0x00d2},
+      {LCD_GREEN, 0x0074},
+      // {LCD_RED,   0x0040},
+  };
+  // clang-format on
+
+  for (u8 i = 0; i < (sizeof(astThresholds) / sizeof(astThresholds[0])); i++) {
+    if (u32Energy > astThresholds[i].u16Threshold) {
+      LedOn(astThresholds[i].eLed);
+    } else {
+      LedOff(astThresholds[i].eLed);
+    }
+  }
 }
 
 static bool SetupUsbRead(AudioFrame *pstFrame) {
