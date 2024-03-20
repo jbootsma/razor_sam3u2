@@ -465,10 +465,6 @@ bool UsbDmaWrite(u8 u8Endpt_, DmaInfo *pstDma_) {
     return FALSE;
   }
 
-  if (pstDma_->szXfer > UINT16_MAX) {
-    return FALSE;
-  }
-
   EndptStateType *pstEpt = &astEndpts[u8Endpt_];
 
   if (!pstEpt->stConfig.bUseDma) {
@@ -496,7 +492,7 @@ bool UsbDmaWrite(u8 u8Endpt_, DmaInfo *pstDma_) {
   // Locked transfers might interfere with user code, due to sharing the same AHB slave (the RAM). For this reason the
   // burst lock is not enabled.
   pstDmaRegs->UDPHS_DMACONTROL = UDPHS_DMACONTROL_CHANN_ENB | UDPHS_DMACONTROL_END_B_EN | UDPHS_DMACONTROL_END_TR_IT |
-                                 UDPHS_DMACONTROL_END_BUFFIT | UDPHS_DMACONTROL_BUFF_LENGTH(pstDma_->szXfer);
+                                 UDPHS_DMACONTROL_END_BUFFIT | UDPHS_DMACONTROL_BUFF_LENGTH(pstDma_->u16XferLen);
 
   return TRUE;
 }
@@ -540,10 +536,6 @@ bool UsbDmaRead(u8 u8Endpt_, DmaInfo *pstDma_) {
     return FALSE;
   }
 
-  if (pstDma_->szXfer > UINT16_MAX) {
-    return FALSE;
-  }
-
   EndptStateType *pstEpt = &astEndpts[u8Endpt_];
 
   if (!pstEpt->stConfig.bUseDma) {
@@ -569,7 +561,7 @@ bool UsbDmaRead(u8 u8Endpt_, DmaInfo *pstDma_) {
   pstDmaRegs->UDPHS_DMAADDRESS = (u32)pstDma_->pvBuffer;
   pstDmaRegs->UDPHS_DMACONTROL = UDPHS_DMACONTROL_CHANN_ENB | UDPHS_DMACONTROL_END_TR_EN | UDPHS_DMACONTROL_END_B_EN |
                                  UDPHS_DMACONTROL_END_TR_IT | UDPHS_DMACONTROL_END_BUFFIT |
-                                 UDPHS_DMACONTROL_BUFF_LENGTH(pstDma_->szXfer);
+                                 UDPHS_DMACONTROL_BUFF_LENGTH(pstDma_->u16XferLen);
 
   return TRUE;
 }
@@ -753,7 +745,7 @@ void UDPD_IrqHandler(void) {
       UDPHS->UDPHS_CLRINT = u32Mask;
       u16 u16Rem = (UDPHS->UDPHS_DMA[dmaIdx + 1].UDPHS_DMASTATUS & UDPHS_DMASTATUS_BUFF_COUNT_Msk) >>
                    UDPHS_DMASTATUS_BUFF_COUNT_Pos;
-      astEndpts[dmaIdx + 1].pstDma->szXfer -= u16Rem;
+      astEndpts[dmaIdx + 1].pstDma->u16XferLen -= u16Rem;
       astEndpts[dmaIdx + 1].bIsReady = FALSE;
 
       CompleteDma(dmaIdx + 1, DMA_COMPLETE);

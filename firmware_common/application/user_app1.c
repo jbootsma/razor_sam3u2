@@ -78,11 +78,14 @@ static const s16 as16SinLut[65] = {0,     804,   1607,  2410,  3211,  4010,  480
 /**********************************************************************************************************************
 Private Function Prototypes
 **********************************************************************************************************************/
-#define MAX_SAMPLES 100
-#define NUM_FRAMES 3
-#define DEFAULT_SAMPLE_RATE 44100
-#define MAX_SAMPLE_RATE 96000
-#define MIN_SAMPLE_RATE 1000
+#define MAX_SAMPLES 50
+#define NUM_AUDIO_FRAMES 4
+#define DEFAULT_SAMPLE_RATE 48000
+#define MAX_SAMPLE_RATE 48000
+#define MIN_SAMPLE_RATE 8000
+
+// Target systick for buzzer frames to end on.
+#define BUZZER_TGT_TICK ((U32_SYSTICK_COUNT / 10) * 2)
 
 typedef struct {
   DmaInfo stDma;
@@ -91,12 +94,24 @@ typedef struct {
   bool bInUse;
 } AudioFrame;
 
-static AudioFrame astFrames[NUM_FRAMES];
+typedef struct {
+  DmaInfo stDma;
+  u16 u16ExpectedTick;
+  u16 au16Samples[MAX_SAMPLES * 2];
+} PwmFrame;
+
+static AudioFrame astFrames[NUM_AUDIO_FRAMES];
+static PwmFrame astPwmFrames[2];
 
 static struct {
   AudioFrame *pstInFrame;
-  AudioFrame *pstOutFrame;
-} stPipeline;
+  AudioFrame *pstUsbOutFrame;
+  PwmFrame *pstPwmFront;
+  PwmFrame *pstPwmBack;
+} stPipeline = {
+    .pstPwmFront = &astPwmFrames[0],
+    .pstPwmBack = &astPwmFrames[1],
+};
 
 typedef enum {
   SRC_LOOPBACK,
@@ -126,27 +141,54 @@ static void SetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan);
 static void GetVolumeCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange);
 static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan);
 
+static void ApplySampleRate(void);
+
 static void ResetAudioFrame(AudioFrame *pstFrame);
 static AudioFrame *GetAvailableFrame(void);
 
-static void ProcessAudioPipeline(void);
-static void FlushOutFrame(void);
-static AudioFrame *PrepareOutFrame(void);
-static AudioFrame *GetInFrame(void);
+static void UpdateFrameLen(void);
 static AudioFrame *PrepareInFrame(void);
+static AudioFrame *GetInFrame(void);
+static void ClearSentFrames(void);
+static void ProcessAudioPipeline(void);
+
+static void SynthAudioFrame(AudioFrame *pstFrame, SamplerFunc pfnSampler);
 static void ProcessAudioFrame(AudioFrame *pstFrame);
 
 static bool SetupUsbRead(AudioFrame *pstFrame);
-static void SynthAudioFrame(AudioFrame *pstFrame, SamplerFunc pfnSampler);
+static void SendToUsb(AudioFrame *pstFrame);
 
-static void ApplySampleRate(void);
+static void BuzzerProcess(AudioFrame *pstFrame);
+static void SendInitialBuzzerFrame(void);
+static void ConvertToBuzzerFormat(AudioFrame *pstInFrame, PwmFrame *pstOutFrame, u16 u16SamplePeriod);
+static void BuzzerDmaCb(DmaInfo *pstDma);
 
-static s32 s32SampleRate;
-static s32 s32InvSampleRate;
-static u16 u16FrameLen;
-static u16 u16FrameRem;
-static bool bDisplayUpToDate;
+static u32 u32SampleRate;
+static u32 u32InvSampleRate; // Fixed point, 1.31
 static SourceSelect eSource;
+
+static struct {
+  u16 u16Base;
+  u16 u16Frac;
+
+  u16 u16Accum;
+  u16 u16Curr;
+} stFrameLen;
+
+static bool bDisplayUpToDate;
+
+extern volatile u32 G_u32BspPwmUnderruns;
+static struct {
+  u32 u32Overruns;
+
+  u32 u32FrameClock;      // fixed point 24.8
+  u32 u32ClocksPerSample; // fixed point 24.8
+  volatile s16 s16TickErr;
+
+  s16 s16SampleCountDiff;
+
+  bool bEnabled;
+} stBuzzer;
 
 /**********************************************************************************************************************
 Function Definitions
@@ -185,7 +227,7 @@ void UserApp1Initialize(void) {
 
   LcdCommand(LCD_DISPLAY_CMD | LCD_DISPLAY_ON);
 
-  s32SampleRate = DEFAULT_SAMPLE_RATE;
+  u32SampleRate = DEFAULT_SAMPLE_RATE;
   ApplySampleRate();
 
   // Start assuming init will be good, ReportError() will override this if something bad happens.
@@ -262,6 +304,13 @@ static inline s16 SampleSin(s16 x_) {
   s32 s32t0 = as16SinLut[u8Idx];
   s32 s32t1 = (s32Delta * as16SinLut[64 - u8Idx]) >> 15;
   return s32sign * (s32t0 + s32t1);
+}
+
+static inline void InitDma(AudioFrame *pstFrame) {
+  pstFrame->stDma = (DmaInfo){
+      .pvBuffer = pstFrame->as16Samples,
+      .u16XferLen = pstFrame->u16NumSamples * sizeof(u16),
+  };
 }
 
 /**********************************************************************************************************************
@@ -653,7 +702,8 @@ static void UpdateDisplay(void) {
 
   char cOutState = stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_0_BYTES ? 'O' : '-';
   char cInState = stUsb.u8InAlt != IFACE_AUDIO_IN_ALT_0_BYTES ? 'I' : '-';
-  snprintf(acLine, sizeof(acLine), "USB %c%c %ldHz", cInState, cOutState, s32SampleRate);
+  snprintf(acLine, sizeof(acLine), "USB %c%c %luHz %s", cInState, cOutState, u32SampleRate,
+           stBuzzer.bEnabled ? "BZ" : "--");
   LcdMessage(LINE1_START_ADDR, acLine);
 
   const char *pcSrc = NULL;
@@ -1009,7 +1059,7 @@ static void GetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan, bool bIsRange) {
 
     UsbWrite(EPT_CTRL, &stRanges, sizeof(stRanges));
   } else {
-    UsbWrite(EPT_CTRL, &s32SampleRate, sizeof(s32SampleRate));
+    UsbWrite(EPT_CTRL, &u32SampleRate, sizeof(u32SampleRate));
   }
 
   UsbNextPacket(EPT_CTRL);
@@ -1020,16 +1070,16 @@ static void SetClkSrcCtrl(u8 u8Ctrl, u8 u8Chan) {
     return;
   }
 
-  s32 s32NewRate;
-  if (sizeof(s32NewRate) != UsbRead(EPT_CTRL, &s32NewRate, sizeof(s32NewRate))) {
+  u32 u32NewRate;
+  if (sizeof(u32NewRate) != UsbRead(EPT_CTRL, &u32NewRate, sizeof(u32NewRate))) {
     return;
   }
 
-  if (s32NewRate < MIN_SAMPLE_RATE || s32NewRate > MAX_SAMPLE_RATE) {
+  if (u32NewRate < MIN_SAMPLE_RATE || u32NewRate > MAX_SAMPLE_RATE) {
     return;
   }
 
-  s32SampleRate = s32NewRate;
+  u32SampleRate = u32NewRate;
   ApplySampleRate();
   UsbNextPacket(EPT_CTRL);
 }
@@ -1131,6 +1181,33 @@ static void SetVolumeCtrl(u8 u8Ctrl, u8 u8Chan) {
   UsbNextPacket(EPT_CTRL);
 }
 
+static void ApplySampleRate(void) {
+  // Precalc various derived values from the sample rate.
+
+  // Get the inverse in as precise a format as we can. Used for period advancement when synthesizing
+  // wave forms.
+  u32InvSampleRate = ((1 << 31) + u32SampleRate / 2) / u32SampleRate;
+
+  // Setup the framelength accumulator. Used by various systems to regularly insert extra samples so
+  // that the overall sample rate is as exact as possible.
+  stFrameLen.u16Base = u32SampleRate / 1000;
+  stFrameLen.u16Frac = u32SampleRate % 1000;
+  stFrameLen.u16Accum = 0;
+  stFrameLen.u16Curr = stFrameLen.u16Base;
+
+  // Changing sample rate on the fly tends to make the PWM sample period feedback loop unstable.
+  // Clear it out and re-seed with a frame of silence.
+  PWMAbortAudio();
+
+  // Setup some things used by the buzzer to set it's per-sample period.
+  stBuzzer.u32ClocksPerSample = (CCLK_VALUE / u32SampleRate) << 8;
+  // Make sure to get the fractional part to.
+  u32 u32Rem = CCLK_VALUE - (stBuzzer.u32ClocksPerSample >> 8) * u32SampleRate;
+  stBuzzer.u32ClocksPerSample += ((u32Rem << 8) + u32SampleRate / 2) / u32SampleRate;
+
+  stBuzzer.s16SampleCountDiff = 0;
+}
+
 static void ResetAudioFrame(AudioFrame *pstFrame) {
   pstFrame->bInUse = FALSE;
   pstFrame->u16NumSamples = 0;
@@ -1138,7 +1215,7 @@ static void ResetAudioFrame(AudioFrame *pstFrame) {
 }
 
 static AudioFrame *GetAvailableFrame(void) {
-  for (u8 i = 0; i < NUM_FRAMES; i++) {
+  for (u8 i = 0; i < NUM_AUDIO_FRAMES; i++) {
     if (!astFrames[i].bInUse) {
       astFrames[i].bInUse = TRUE;
       return &astFrames[i];
@@ -1148,75 +1225,14 @@ static AudioFrame *GetAvailableFrame(void) {
   return NULL;
 }
 
-static void ProcessAudioPipeline(void) {
-  FlushOutFrame();
+static void UpdateFrameLen(void) {
+  stFrameLen.u16Accum += stFrameLen.u16Frac;
+  stFrameLen.u16Curr = stFrameLen.u16Base;
 
-  if (!stPipeline.pstOutFrame) {
-    stPipeline.pstOutFrame = PrepareOutFrame();
+  if (stFrameLen.u16Accum >= 1000) {
+    stFrameLen.u16Accum -= 1000;
+    stFrameLen.u16Curr += 1;
   }
-
-  if (!stPipeline.pstInFrame) {
-    stPipeline.pstInFrame = PrepareInFrame();
-  }
-}
-
-static void FlushOutFrame(void) {
-  if (!stPipeline.pstOutFrame) {
-    return;
-  }
-
-  if (stPipeline.pstOutFrame->stDma.eStatus != DMA_ACTIVE) {
-    ResetAudioFrame(stPipeline.pstOutFrame);
-    stPipeline.pstOutFrame = NULL;
-  }
-}
-
-static AudioFrame *PrepareOutFrame(void) {
-  AudioFrame *pstFrame = GetInFrame();
-  if (!pstFrame) {
-    return NULL;
-  }
-
-  ProcessAudioFrame(pstFrame);
-
-  if (stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_200_BYTES) {
-    ResetAudioFrame(pstFrame);
-    return NULL;
-  }
-
-  pstFrame->stDma = (DmaInfo){
-      .pvBuffer = &pstFrame->as16Samples,
-      .szXfer = pstFrame->u16NumSamples * sizeof(u16),
-  };
-
-  if (!UsbDmaWrite(EPT_AUDIO_OUT, &pstFrame->stDma)) {
-    ResetAudioFrame(pstFrame);
-    pstFrame = NULL;
-  }
-
-  return pstFrame;
-}
-
-static AudioFrame *GetInFrame(void) {
-  if (!stPipeline.pstInFrame) {
-    return NULL;
-  }
-
-  if (stPipeline.pstInFrame->stDma.eStatus == DMA_ACTIVE) {
-    return NULL;
-  }
-
-  AudioFrame *pstFrame = stPipeline.pstInFrame;
-  stPipeline.pstInFrame = NULL;
-
-  if (pstFrame->stDma.eStatus == DMA_COMPLETE) {
-    pstFrame->u16NumSamples = pstFrame->stDma.szXfer / sizeof(u16);
-  } else {
-    ResetAudioFrame(pstFrame);
-    pstFrame = NULL;
-  }
-
-  return pstFrame;
 }
 
 static AudioFrame *PrepareInFrame(void) {
@@ -1253,13 +1269,120 @@ static AudioFrame *PrepareInFrame(void) {
 
   if (bSynthed) {
     // No actual DMA, so simulate it.
-    pstFrame->stDma = (DmaInfo){
-        .eStatus = DMA_COMPLETE,
-        .szXfer = pstFrame->u16NumSamples * sizeof(u16),
-    };
+    InitDma(pstFrame);
+    pstFrame->stDma.eStatus = DMA_COMPLETE;
   }
 
   return pstFrame;
+}
+
+static AudioFrame *GetInFrame(void) {
+  if (!stPipeline.pstInFrame) {
+    return NULL;
+  }
+
+  if (stPipeline.pstInFrame->stDma.eStatus == DMA_ACTIVE) {
+    return NULL;
+  }
+
+  AudioFrame *pstFrame = stPipeline.pstInFrame;
+  stPipeline.pstInFrame = NULL;
+
+  if (pstFrame->stDma.eStatus == DMA_COMPLETE) {
+    pstFrame->u16NumSamples = pstFrame->stDma.u16XferLen / sizeof(u16);
+  } else {
+    ResetAudioFrame(pstFrame);
+    pstFrame = NULL;
+  }
+
+  return pstFrame;
+}
+
+static void ClearSentFrames(void) {
+  if (stPipeline.pstUsbOutFrame) {
+    if (stPipeline.pstUsbOutFrame->stDma.eStatus != DMA_ACTIVE) {
+      ResetAudioFrame(stPipeline.pstUsbOutFrame);
+      stPipeline.pstUsbOutFrame = NULL;
+    }
+  }
+
+  if (stPipeline.pstPwmFront->stDma.eStatus != DMA_ACTIVE) {
+    PwmFrame *pstTmp = stPipeline.pstPwmFront;
+    stPipeline.pstPwmFront = stPipeline.pstPwmBack;
+    stPipeline.pstPwmBack = pstTmp;
+  }
+}
+
+static void ProcessAudioPipeline(void) {
+  ClearSentFrames();
+  UpdateFrameLen();
+
+  AudioFrame *pstFrame = GetInFrame();
+  if (pstFrame) {
+    ProcessAudioFrame(pstFrame);
+    BuzzerProcess(pstFrame);
+    SendToUsb(pstFrame);
+  }
+
+  if (!stPipeline.pstInFrame) {
+    stPipeline.pstInFrame = PrepareInFrame();
+  }
+}
+
+static void SynthAudioFrame(AudioFrame *pstFrame, SamplerFunc pfnSampler) {
+  static u16 u16FrameErrAccum = 0;
+  static s16 s16Period = 0;
+
+  // clang-format off
+  static const u16 au16Notes[] = {
+     D3, A3, D4,
+     F4, D4, A3,
+     E4, F4, D4,
+     F4, D4, A3,
+
+     E3, A3, C4,
+     E4, C4, A3,
+     A4, E4, C4,
+     E4, C4, A3,
+
+     D3, A3, D4,
+     F4, D4, A3,
+     E4, F4, D4,
+     F4, D4, A3,
+
+     F3, A3, D4, F4, D4, A3,
+     D3S, G3, C4, D4S, C4, G3,
+  };
+  // clang-format on
+  static const u32 u32Notecount = sizeof(au16Notes) / sizeof(au16Notes[0]);
+  static u32 u32NoteIdx = 0;
+  static u8 u8FrameCtr = 250;
+
+  if (--u8FrameCtr == 0) {
+    u8FrameCtr = 250;
+    if (++u32NoteIdx == u32Notecount) {
+      u32NoteIdx = 0;
+    }
+  }
+  u16 u16Note = au16Notes[u32NoteIdx];
+
+  pstFrame->u16NumSamples = stFrameLen.u16Curr;
+
+  if (u16FrameErrAccum >= 1000) {
+    pstFrame->u16NumSamples += 1;
+    u16FrameErrAccum -= 1000;
+  }
+
+  for (u8 u8Idx = 0; u8Idx < pstFrame->u16NumSamples; u8Idx++) {
+    s16 s16Sample = pfnSampler(s16Period);
+
+    pstFrame->as16Samples[u8Idx] = s16Sample;
+
+    // NOTE: There's a multiply by 2 folded into this.
+    // This is due to the range of a period being from -1.0 to 1.0.
+    // The shift is based on period being 2^15, inv rate being 2^31, and wanting to multiply by a power of 2.
+    s16Period += (u16Note * u32InvSampleRate + 0x2000) >> 15;
+  }
 }
 
 static void ProcessAudioFrame(AudioFrame *pstFrame) {
@@ -1304,7 +1427,6 @@ static void ProcessAudioFrame(AudioFrame *pstFrame) {
       {RED,       0x017d},
       {LCD_BLUE,  0x00d2},
       {LCD_GREEN, 0x0074},
-      // {LCD_RED,   0x0040},
   };
   // clang-format on
 
@@ -1320,85 +1442,152 @@ static void ProcessAudioFrame(AudioFrame *pstFrame) {
 static bool SetupUsbRead(AudioFrame *pstFrame) {
   if (stUsb.u8InAlt != IFACE_AUDIO_IN_ALT_200_BYTES) {
     // If the host isn't actively feeding in data treat it the same as getting silence.
-    pstFrame->u16NumSamples = u16FrameLen;
+    pstFrame->u16NumSamples = stFrameLen.u16Curr;
     memset(pstFrame->as16Samples, 0, sizeof(u16) * pstFrame->u16NumSamples);
 
-    pstFrame->stDma = (DmaInfo){
-        .szXfer = pstFrame->u16NumSamples * sizeof(u16),
-        .eStatus = DMA_COMPLETE,
-    };
+    InitDma(pstFrame);
+    pstFrame->stDma.eStatus = DMA_COMPLETE;
     return TRUE;
   }
 
-  pstFrame->stDma = (DmaInfo){
-      .pvBuffer = pstFrame->as16Samples,
-      .szXfer = sizeof(pstFrame->as16Samples),
-  };
-
+  pstFrame->u16NumSamples = MAX_SAMPLES;
+  InitDma(pstFrame);
   return UsbDmaRead(EPT_AUDIO_IN, &pstFrame->stDma);
 }
 
-static void SynthAudioFrame(AudioFrame *pstFrame, SamplerFunc pfnSampler) {
-  static u16 u16FrameErrAccum = 0;
-  static s16 s16Period = 0;
-
-  // clang-format off
-  static const u16 au16Notes[] = {
-     D3, A3, D4,
-     F4, D4, A3,
-     E4, F4, D4,
-     F4, D4, A3,
-
-     E3, A3, C4,
-     E4, C4, A3,
-     A4, E4, C4,
-     E4, C4, A3,
-
-     D3, A3, D4,
-     F4, D4, A3,
-     E4, F4, D4,
-     F4, D4, A3,
-
-     F3, A3, D4, F4, D4, A3,
-     D3S, G3, C4, D4S, C4, G3,
-  };
-  // clang-format on
-  static const u32 u32Notecount = sizeof(au16Notes) / sizeof(au16Notes[0]);
-  static u32 u32NoteIdx = 0;
-  static u8 u8FrameCtr = 250;
-
-  if (--u8FrameCtr == 0) {
-    u8FrameCtr = 250;
-    if (++u32NoteIdx == u32Notecount) {
-      u32NoteIdx = 0;
-    }
-  }
-  u16 u16Note = au16Notes[u32NoteIdx];
-
-  pstFrame->u16NumSamples = u16FrameLen;
-  u16FrameErrAccum += u16FrameRem;
-
-  if (u16FrameErrAccum >= 1000) {
-    pstFrame->u16NumSamples += 1;
-    u16FrameErrAccum -= 1000;
+static void SendToUsb(AudioFrame *pstFrame) {
+  if (stUsb.u8OutAlt != IFACE_AUDIO_OUT_ALT_200_BYTES || stPipeline.pstUsbOutFrame) {
+    ResetAudioFrame(pstFrame);
+    return;
   }
 
-  for (u8 u8Idx = 0; u8Idx < pstFrame->u16NumSamples; u8Idx++) {
-    s16 s16Sample = pfnSampler(s16Period);
-
-    pstFrame->as16Samples[u8Idx] = s16Sample / 2;
-
-    // NOTE: There's a multiply by 2 folded into this.
-    // This is due to the range of a period being from -1.0 to 1.0.
-    s16Period += (u16Note * s32InvSampleRate + 0x3fff) >> 14;
+  InitDma(pstFrame);
+  if (!UsbDmaWrite(EPT_AUDIO_OUT, &pstFrame->stDma)) {
+    ResetAudioFrame(pstFrame);
+    return;
   }
+
+  stPipeline.pstUsbOutFrame = pstFrame;
 }
 
-static void ApplySampleRate(void) {
-  // Precalc the inverse of the sample rate to use for period advancement.
-  s32InvSampleRate = ((1 << 30) + (s32SampleRate / 2 - 1)) / s32SampleRate;
-  u16FrameLen = s32SampleRate / 1000;
-  u16FrameRem = s32SampleRate % 1000;
+static void BuzzerProcess(AudioFrame *pstFrame) {
+  if (!stBuzzer.bEnabled) {
+    return;
+  }
+
+  if (stPipeline.pstPwmFront->stDma.eStatus != DMA_ACTIVE) {
+    SendInitialBuzzerFrame();
+  }
+
+  if (stPipeline.pstPwmBack->stDma.eStatus == DMA_ACTIVE) {
+    stBuzzer.u32Overruns += 1;
+    return;
+  }
+
+  // Track difference in expected and actual samples.
+  // This can drift by up to 2, but any more than that and we will assume a missed/extra sample
+  // from the source. In that case the feedback loop will stretch/shrink sample time to accomodate.
+  stBuzzer.s16SampleCountDiff += stFrameLen.u16Curr - pstFrame->u16NumSamples;
+
+  // Track the target time for the sample to end at. Remember that the systick counter counts down!
+  stBuzzer.u32FrameClock -= stBuzzer.u32ClocksPerSample * pstFrame->u16NumSamples;
+  if (stBuzzer.s16SampleCountDiff < -2) {
+    stBuzzer.s16SampleCountDiff += 1;
+    stBuzzer.u32FrameClock -= stBuzzer.u32ClocksPerSample;
+  } else if (stBuzzer.s16SampleCountDiff > 2) {
+    stBuzzer.s16SampleCountDiff -= 1;
+    stBuzzer.u32FrameClock += stBuzzer.u32ClocksPerSample;
+  }
+  // Bias by a frame time every, well, frame.
+  stBuzzer.u32FrameClock += (U32_SYSTICK_COUNT * SYSTICK_DIVIDER) << 8;
+
+  u16 u16SamplePeriod = stBuzzer.u32ClocksPerSample >> 8;
+  // P-only PID control loop. There's a bit of a delay in the system due to the frame pipelining,
+  // so using a fairly small p term of 0.1 to avoid oscillation problems.
+  s16 s16Err = stBuzzer.s16TickErr; // In ticks.
+  s16Err *= SYSTICK_DIVIDER;        // In clocks.
+  // Combine division factors.
+  s16 s16DivFactor = stFrameLen.u16Curr * 10;
+
+  // Round up in the following division.
+  if (s16Err > 0) {
+    s16Err += s16DivFactor - 1;
+  } else {
+    s16Err -= s16DivFactor - 1;
+  }
+  s16Err /= s16DivFactor; // In clocks/per sample, scaled by P.
+
+  // Positive error means measured was earlier than target, so need longer period to compensate.
+  u16SamplePeriod += s16Err;
+
+  static u32 u32Ctr = 500;
+  if (--u32Ctr == 0) {
+    u32Ctr = 500;
+    DebugPrintf("P: ");
+    DebugPrintNumber(u16SamplePeriod);
+    if (stBuzzer.s16TickErr < 0) {
+      DebugPrintf(" TE: -");
+      DebugPrintNumber(-stBuzzer.s16TickErr);
+    } else {
+      DebugPrintf(" TE: ");
+      DebugPrintNumber(stBuzzer.s16TickErr);
+    }
+    DebugLineFeed();
+  }
+
+  // Prepare and send the frame.
+  ConvertToBuzzerFormat(pstFrame, stPipeline.pstPwmBack, u16SamplePeriod);
+  stPipeline.pstPwmBack->u16ExpectedTick = ((stBuzzer.u32FrameClock >> 8) + (SYSTICK_DIVIDER / 2)) / SYSTICK_DIVIDER;
+
+  PWMAudioSendFrame(&stPipeline.pstPwmBack->stDma, u16SamplePeriod);
+}
+
+static void SendInitialBuzzerFrame(void) {
+  memset(stPipeline.pstPwmFront->au16Samples, 0, sizeof(stPipeline.pstPwmFront->au16Samples));
+  stPipeline.pstPwmFront->stDma = (DmaInfo){
+      .pvBuffer = stPipeline.pstPwmFront->au16Samples,
+      .OnCompleteCb = BuzzerDmaCb,
+  };
+
+  stBuzzer.u32FrameClock = (BUZZER_TGT_TICK * SYSTICK_DIVIDER) << 8;
+  stPipeline.pstPwmFront->u16ExpectedTick = BUZZER_TGT_TICK;
+
+  // Do tick calculation last just to reduce initial error.
+  u16 u16Tick = (SysTick->VAL & SysTick_VAL_CURRENT_Msk) >> SysTick_VAL_CURRENT_Pos;
+  u16 u16Samples = (u16Tick - BUZZER_TGT_TICK) * SYSTICK_DIVIDER / (stBuzzer.u32ClocksPerSample >> 8);
+  stPipeline.pstPwmFront->stDma.u16XferLen = u16Samples * 4; // 4 bytes, 2 channels.
+  PWMAudioSendFrame(&stPipeline.pstPwmFront->stDma, stBuzzer.u32ClocksPerSample >> 8);
+}
+
+static void ConvertToBuzzerFormat(AudioFrame *pstInFrame, PwmFrame *pstOutFrame, u16 u16SamplePeriod) {
+  for (u16 i = 0; i < pstInFrame->u16NumSamples; i++) {
+    s32 s = pstInFrame->as16Samples[i];
+
+    // Transform from a value in the range [-1.0, 1.0] in fixed point to a value in the range
+    // [0, period].
+    s = (s * u16SamplePeriod) >> 16;
+    s += u16SamplePeriod >> 1;
+
+    // Double it up for "stereo" (really because we are feeding two PWM channels).
+    pstOutFrame->au16Samples[i * 2] = s;
+    pstOutFrame->au16Samples[i * 2 + 1] = s;
+  }
+
+  pstOutFrame->stDma = (DmaInfo){
+      .pvBuffer = &(pstOutFrame->au16Samples),
+      .u16XferLen = pstInFrame->stDma.u16XferLen * 2,
+      .OnCompleteCb = BuzzerDmaCb,
+  };
+}
+
+static void BuzzerDmaCb(DmaInfo *pstDma) {
+  if (pstDma->eStatus != DMA_COMPLETE) {
+    return;
+  }
+
+  PwmFrame *pstFrame = (PwmFrame *)pstDma;
+  u16 u16tick = (SysTick->VAL & SysTick_VAL_CURRENT_Msk) >> SysTick_VAL_CURRENT_Pos;
+  stBuzzer.s16TickErr = u16tick - pstFrame->u16ExpectedTick;
 }
 
 /**********************************************************************************************************************
@@ -1435,8 +1624,35 @@ static void UserApp1SM_Idle(void) {
     bDisplayUpToDate = FALSE;
   }
 
+  if (WasButtonPressed(BUTTON2)) {
+    ButtonAcknowledge(BUTTON2);
+    stBuzzer.bEnabled = !stBuzzer.bEnabled;
+    bDisplayUpToDate = FALSE;
+  }
+
   ProcessAudioPipeline();
   UpdateDisplay();
+
+  static u32 u32Ctr = 200;
+  if (--u32Ctr == 0) {
+    u32Ctr = 200;
+
+    if (G_u32BspPwmUnderruns) {
+      DebugPrintNumber(G_u32BspPwmUnderruns);
+      DebugPrintf(" underruns ");
+    }
+
+    if (stBuzzer.u32Overruns) {
+      DebugPrintNumber(stBuzzer.u32Overruns);
+      DebugPrintf(" overruns ");
+    }
+
+    if (G_u32BspPwmUnderruns || stBuzzer.u32Overruns) {
+      DebugLineFeed();
+      G_u32BspPwmUnderruns = 0;
+      stBuzzer.u32Overruns = 0;
+    }
+  }
 } /* end UserApp1SM_Idle() */
 
 /*-------------------------------------------------------------------------------------------------------------------*/

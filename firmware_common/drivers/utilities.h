@@ -20,7 +20,7 @@ typedef enum {
 
 typedef struct DmaInfo {
   void *pvBuffer;
-  size_t szXfer;
+  u16 u16XferLen;
   volatile DmaStatus eStatus;
   void (*OnCompleteCb)(struct DmaInfo *pstDma_);
 } DmaInfo;

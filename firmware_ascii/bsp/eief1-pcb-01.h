@@ -99,8 +99,9 @@ typedef enum { BUZZER1 = PWM_SR_CHID0, BUZZER2 = PWM_SR_CHID1 } BuzzerChannelTyp
 #define ANT_PIOB_PINS                                                                                                  \
   (u32)(PB_21_ANT_RESET | PB_22_ANT_USPI2_CS | PB_23_ANT_MRDY | PB_24_ANT_SRDY) /*!< @brief  ANT pins on PIOB */
 
-#define ANT_DISABLE_BUTTON (PIOB->PIO_PDSR & PB_00_BUTTON1) /*!< @brief Button to press to disable ANT during startup  \
-                                                             */
+#define ANT_DISABLE_BUTTON                                                                                             \
+  (PIOB->PIO_PDSR & PB_00_BUTTON1) /*!< @brief Button to press to disable ANT during startup                           \
+                                    */
 
 /***********************************************************************************************************************
  * Constants
@@ -135,9 +136,9 @@ Should be 6000 for 48MHz CCLK. */
 /*------------------------------------------------------------------------------------------------------------------*/
 /*! @publicsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
-void PWMAudioSetFrequency(BuzzerChannelType eChannel_, u16 u16Frequency_);
-void PWMAudioOn(BuzzerChannelType eBuzzerChannel_);
-void PWMAudioOff(BuzzerChannelType eBuzzerChannel_);
+
+bool PWMAudioSendFrame(DmaInfo *pstDma, u16 u16SamplePeriod);
+void PWMAbortAudio(void);
 
 /*------------------------------------------------------------------------------------------------------------------*/
 /*! @protectedsection */
@@ -1631,7 +1632,7 @@ $$$$$ PWM setup values
     00 [0] "
 */
 
-#define PWM_SCM_INIT (u32)0x00000000
+#define PWM_SCM_INIT (u32)0x00020003
 /*
     31 [0] Reserved
     30 [0] "
@@ -1650,7 +1651,7 @@ $$$$$ PWM setup values
 
     19 [0] Reserved
     18 [0] "
-    17 [0] UPDM
+    17 [1] UPDM MODE2 - Update automatically using PDC.
     16 [0] "
 
     15 [0] Reserved
@@ -1670,12 +1671,12 @@ $$$$$ PWM setup values
 
     03 [0] SYNC3 not synchronous
     02 [0] SYNC2 not synchronous
-    01 [0] SYNC1 not synchronous
-    00 [0] SYNC0 not synchronous
+    01 [1] SYNC1 is synchronous
+    00 [1] SYNC0 is synchronous
 */
 
-#define PWM_CMR0_INIT (u32)0x00000003
-#define PWM_CMR1_INIT (u32)0x00000003
+#define PWM_CMR0_INIT (u32)0x00000000
+#define PWM_CMR1_INIT (u32)0x00000000
 /*
     31 [0] Reserved
     30 [0] "
@@ -1712,34 +1713,21 @@ $$$$$ PWM setup values
     05 [0] "
     04 [0] "
 
-    03 [0] CPRE clock is MCK/8
+    03 [0] CPRE clock is MCK
     02 [0] "
-    01 [1] "
-    00 [1] "
+    01 [0] "
+    00 [0] "
 */
-#define CPRE_CLCK_SCALE (u32)8
+#define CPRE_CLCK_SCALE (u32)1
 #define CPRE_CLCK CCLK_VALUE / CPRE_CLCK_SCALE
 
-/* To achieve the full range of audio we want from 100Hz to 20kHz, we must be able to set periods
-of 10ms to 50us.
-- 10ms at 48MHz clock is 480,000 ticks
-- 50us at 48MHz clock is 2400 ticks
-- Only 16 bits are available to set the PWM period, so scale the clock by 8:
-- 10ms at 6MHz clock is 60,000 ticks
-- 50us at 6MHz clock is 300 ticks
-
-Set the default period for audio on channel 0 as 1/1kHz
-1ms at 6MHz = 6000 (duty = 3000)
-Set the default period for audio on channel 1 as 1/4kHz
-0.25ms at 6MHz = 1500 (duty = 750)
-
-In general, the period is 6000000 / frequency and duty is always period / 2.
-*/
-
-#define PWM_CPRD0_INIT (u32)6000
-#define PWM_CPRD1_INIT (u32)1500
-#define PWM_CDTY0_INIT (u32)(PWM_CPRD0_INIT << 1)
-#define PWM_CDTY1_INIT (u32)(PWM_CPRD1_INIT << 1)
+// Default period is suitable for 48 KHz sample rate.
+// This is overriden before use anyways so value is not that important.
+#define PWM_CPRD0_INIT (u32)1000
+#define PWM_CPRD1_INIT (u32)1000
+// Initial duty locks waveforms at 0.
+#define PWM_CDTY0_INIT (u32)(PWM_CPRD0_INIT)
+#define PWM_CDTY1_INIT (u32)(PWM_CPRD1_INIT)
 
 /***********************************************************************************************************************
 %%%%% Template register settings

@@ -64,6 +64,9 @@ Variable names shall start with "Bsp_" and be declared as static.
 ***********************************************************************************************************************/
 static u32 Bsp_u32TimingViolationsCounter = 0;
 
+static DmaInfo *volatile Bsp_pstCurrPwm;
+static DmaInfo *volatile Bsp_pstNextPwm;
+
 /***********************************************************************************************************************
 Function Definitions
 ***********************************************************************************************************************/
@@ -381,144 +384,176 @@ Promises:
 
 */
 void PWMSetupAudio(void) {
-  /* Set all intialization values */
+  /* Set all initialization values */
   PWM->PWM_CLK = PWM_CLK_INIT;
+  PWM->PWM_IER2 = PWM_IER2_ENDTX;
+  PWM->PWM_SCM = PWM_SCM_INIT;
 
   PWM->PWM_CH_NUM[0].PWM_CMR = PWM_CMR0_INIT;
   PWM->PWM_CH_NUM[0].PWM_CPRD = PWM_CPRD0_INIT;    /* Set current frequency */
   PWM->PWM_CH_NUM[0].PWM_CPRDUPD = PWM_CPRD0_INIT; /* Latch CPRD values */
-  PWM->PWM_CH_NUM[0].PWM_CDTY = PWM_CDTY0_INIT;    /* Set 50% duty */
+  PWM->PWM_CH_NUM[0].PWM_CDTY = PWM_CDTY0_INIT;    /* Set 0% duty */
   PWM->PWM_CH_NUM[0].PWM_CDTYUPD = PWM_CDTY0_INIT; /* Latch CDTY values */
 
-  PWM->PWM_CH_NUM[1].PWM_CMR = PWM_CMR1_INIT;
-  PWM->PWM_CH_NUM[1].PWM_CPRD = PWM_CPRD1_INIT;    /* Set current frequency  */
-  PWM->PWM_CH_NUM[1].PWM_CPRDUPD = PWM_CPRD1_INIT; /* Latch CPRD values */
-  PWM->PWM_CH_NUM[1].PWM_CDTY = PWM_CDTY1_INIT;    /* Set 50% duty */
-  PWM->PWM_CH_NUM[1].PWM_CDTYUPD = PWM_CDTY1_INIT; /* Latch CDTY values */
+  PWM->PWM_CH_NUM[1].PWM_CMR = PWM_CMR0_INIT;
+  PWM->PWM_CH_NUM[1].PWM_CPRD = PWM_CPRD0_INIT;    /* Set current frequency */
+  PWM->PWM_CH_NUM[1].PWM_CPRDUPD = PWM_CPRD0_INIT; /* Latch CPRD values */
+  PWM->PWM_CH_NUM[1].PWM_CDTY = PWM_CDTY0_INIT;    /* Set 0% duty */
+  PWM->PWM_CH_NUM[1].PWM_CDTYUPD = PWM_CDTY0_INIT; /* Latch CDTY values */
 
+  // Allow the PDC to be used for transfers.
+  PWM->PWM_PTCR = PERIPH_PTCR_TXTEN;
+
+  NVIC_ClearPendingIRQ(PWM_IRQn);
 } /* end PWMSetupAudio() */
 
 /*--------------------------------------------------------------------------------------------------------------------*/
 /*! @publicsection */
 /*--------------------------------------------------------------------------------------------------------------------*/
 
-/*!---------------------------------------------------------------------------------------------------------------------
-@fn void PWMAudioSetFrequency(BuzzerChannelType eChannel_, u16 u16Frequency_)
+typedef enum {
+  NO_DMA_ACTION,
+  FRAME_QUEUED,
+  FRAME_COMPLETED,
+  UNDERRUN,
+  FRAMES_ABORTED,
+} DmaAction;
 
-@brief Configures the PWM peripheral with the desired frequency on the specified channel.
+static struct {
+  DmaAction eAction;
+  u32 u32SysTime;
+  u32 u32SysTick;
+} astDmaLog[64];
 
-If the buzzer is already on, it will change frequency (essentially) immediately.
-If it is not on, the new frequency will be audible next time PWMAudioOn() is called.
+static u8 u8LogIdx;
 
-Example:
+static inline void LogDma(DmaAction eAction) {
+  u32 prim = __get_PRIMASK();
+  __disable_irq();
+  u8 u8Idx = u8LogIdx++ & 63;
+  astDmaLog[u8Idx].u32SysTick = SysTick->VAL;
+  astDmaLog[u8Idx].eAction = eAction;
+  astDmaLog[u8Idx].u32SysTime = G_u32SystemTime1ms;
+  __set_PRIMASK(prim);
+}
 
-PWMAudioSetFrequency(BUZZER1, 1000);
-
-Requires:
-- The PWM peripheral is correctly configured for the current processor clock speed.
-- CPRE_CLCK is the clock frequency for the PWM peripheral
-
-@param eChannel_ is the channel of interest and corresponds to the channel bit
-position of the buzzer in the PWM peripheral
-@param u16Frequency_ is in Hertz and should be in the range 100 - 20,000 since
-       that is the audible range.  Higher and lower frequencies are allowed, though.
-
-Promises:
-- The frequency and duty cycle values for the requested channel are calculated
-  and then latched to their respective update registers (CPRDUPDR, CDTYUPDR)
-- If the channel is not valid, nothing happens
-
-*/
-void PWMAudioSetFrequency(BuzzerChannelType eChannel_, u16 u16Frequency_) {
-  u32 u32ChannelPeriod;
-  PwmCh_num *psChannelAddress;
-
-  /* Get the base address of the channel */
-  switch (eChannel_) {
-  case BUZZER1: {
-    psChannelAddress = &PWM->PWM_CH_NUM[0];
-    break;
+/**
+ * @brief Queue a chunk of samples to play with the buzzer
+ *
+ * @param pstDma_ A DMA buffer holding the sample values to play. It should be a series of 16-bit unsigned integers,
+ * one per sample. (They are used directly as the duty-cycle value by the peripheral). These are relative to the
+ * sample period. This means that a sample with value >= u32SamplePeriod is effectively 100%.
+ *
+ * @param u32SamplePeriod The time of one sample period in system clock ticks.
+ */
+bool PWMAudioSendFrame(DmaInfo *pstDma_, u16 u16SamplePeriod) {
+  if (u16SamplePeriod == 0 || !pstDma_ || !pstDma_->pvBuffer || (pstDma_->u16XferLen & 0x1)) {
+    return FALSE;
   }
 
-  case BUZZER2: {
-    psChannelAddress = &PWM->PWM_CH_NUM[1];
-    break;
+  if (Bsp_pstNextPwm) {
+    return FALSE;
   }
 
-  default: {
-    /* Invalid channel */
-    return;
-  }
-  }
+  pstDma_->eStatus = DMA_ACTIVE;
 
-  /* Calculate the period based on the requested frequency.
-  The duty cycle is this value divided by 2 (right shift 1) */
-  u32ChannelPeriod = CPRE_CLCK / u16Frequency_;
+  __disable_irq();
+  LogDma(FRAME_QUEUED);
+  PWM->PWM_CH_NUM[0].PWM_CPRDUPD = PWM_CPRDUPD_CPRDUPD(u16SamplePeriod);
+  // Learned the hard way: Cannot trust the PWM_SR to be up to date. Enable/disable takes some time.
+  // However it will always honor the most recent request, so all we need to do here is say to keep
+  // going and fill in the missing steps the IRQ would have normally done.
+  if (Bsp_pstCurrPwm == NULL) {
+    Bsp_pstCurrPwm = pstDma_;
+    // Replicate everything that would normally be handled by the interrupt.
+    PWM->PWM_TPR = (u32)pstDma_->pvBuffer;
+    PWM->PWM_TCR = PWM_TCR_TXCTR(pstDma_->u16XferLen >> 1);
 
-  /* Set different registers depending on if PWM is already running */
-  if (PWM->PWM_SR & eChannel_) {
-    /* Beeper is already running, so use update registers */
-    psChannelAddress->PWM_CPRDUPD = u32ChannelPeriod;
-    psChannelAddress->PWM_CDTYUPD = u32ChannelPeriod >> 1;
+    PWM->PWM_SCUC = PWM_SCUC_UPDULOCK;
+
+    // Start at the right period if the channel was fully disabled. We might miss one period worth
+    // in really rare cases, but that's probably okay.
+    if (!(PWM->PWM_SR & PWM_SR_CHID0)) {
+      PWM->PWM_CH_NUM[0].PWM_CPRD = PWM_CPRD_CPRD(u16SamplePeriod);
+    }
+
+    NVIC_ClearPendingIRQ(PWM_IRQn);
+    NVIC_EnableIRQ(PWM_IRQn);
+    PWM->PWM_ENA = PWM_ENA_CHID0;
   } else {
-    /* Beeper is off, so use direct registers */
-    psChannelAddress->PWM_CPRD = u32ChannelPeriod;
-    psChannelAddress->PWM_CDTY = u32ChannelPeriod >> 1;
+    Bsp_pstNextPwm = pstDma_;
+  }
+  __enable_irq();
+
+  return TRUE;
+} /* end PWMAudioSendWave */
+
+void PWMAbortAudio(void) {
+  DmaInfo *pstCurr;
+  DmaInfo *pstNext;
+
+  __disable_irq();
+  LogDma(FRAMES_ABORTED);
+  PWM->PWM_DIS = PWM_DIS_CHID0;
+  PWM->PWM_TCR = 0;
+  NVIC_DisableIRQ(PWM_IRQn);
+
+  pstCurr = Bsp_pstCurrPwm;
+  Bsp_pstCurrPwm = NULL;
+  pstNext = Bsp_pstNextPwm;
+  Bsp_pstNextPwm = NULL;
+  __enable_irq();
+
+  if (pstCurr) {
+    pstCurr->eStatus = DMA_ABORTED;
+    if (pstCurr->OnCompleteCb) {
+      pstCurr->OnCompleteCb(pstCurr);
+    }
   }
 
-} /* end PWMAudioSetFrequency() */
-
-/*!---------------------------------------------------------------------------------------------------------------------
-@fn void PWMAudioOn(BuzzerChannelType eBuzzerChannel_)
-
-@brief Enables a PWM channel so the buzzer is on.
-
-Example:
-
-PWMAudioOn(BUZZER2);
-
-Requires:
-- All peripheral values should be configured
-- Frequency of the desired channel should already be set
-
-@param eBuzzerChannel_ is a valid BuzzerChannelType (BUZZER1 or BUZZER2)
-
-Promises:
-- PWM for the selected channel is enabled
-
-*/
-void PWMAudioOn(BuzzerChannelType eBuzzerChannel_) {
-  /* Enable the channel to turn the buzzer on*/
-  PWM->PWM_ENA = (u32)eBuzzerChannel_;
-
-} /* end PWMAudioOn() */
-
-/*!---------------------------------------------------------------------------------------------------------------------
-@fn void PWMAudioOff(BuzzerChannelType eBuzzerChannel_)
-
-@brief Disables a PWM channel so the buzzer is off.
-
-Example:
-
-PWMAudioOff(BUZZER2);
-
-
-Requires:
-@param eBuzzerChannel_ is a valid BuzzerChannelType (BUZZER1 or BUZZER2)
-
-Promises:
-- PWM for the selected channel is disabled
-
-*/
-void PWMAudioOff(BuzzerChannelType eBuzzerChannel_) {
-  /* Disable the channel to turn the buzzer off */
-  PWM->PWM_DIS = (u32)eBuzzerChannel_;
-
-} /* end PWMAudioOff() */
+  if (pstNext) {
+    pstNext->eStatus = DMA_ABORTED;
+    if (pstNext->OnCompleteCb) {
+      pstNext->OnCompleteCb(pstNext);
+    }
+  }
+} /* end PWMAbortAudio */
 
 /*--------------------------------------------------------------------------------------------------------------------*/
 /*! @privatesection */
 /*--------------------------------------------------------------------------------------------------------------------*/
+volatile u32 G_u32BspPwmUnderruns;
+
+void PWM_IrqHandler(void) {
+  // Do a single read because some events/interrupts are cleared on read.
+  u32 u32Status = PWM->PWM_ISR2;
+
+  if (u32Status & PWM_ISR2_ENDTX) {
+    DmaInfo *pstDma = Bsp_pstCurrPwm;
+    Bsp_pstCurrPwm = Bsp_pstNextPwm;
+    Bsp_pstNextPwm = NULL;
+
+    // Latch in the new period for the next block, or stop any output if a new frame was not ready.
+    if (Bsp_pstCurrPwm) {
+      PWM->PWM_SCUC = PWM_SCUC_UPDULOCK;
+      PWM->PWM_TPR = (u32)Bsp_pstCurrPwm->pvBuffer;
+      PWM->PWM_TCR = PWM_TCR_TXCTR(Bsp_pstCurrPwm->u16XferLen >> 1);
+    } else {
+      PWM->PWM_DIS = PWM_DIS_CHID0;
+      NVIC_DisableIRQ(PWM_IRQn);
+      LogDma(UNDERRUN);
+      G_u32BspPwmUnderruns += 1;
+    }
+
+    if (pstDma) {
+      LogDma(FRAME_COMPLETED);
+      pstDma->eStatus = DMA_COMPLETE;
+      if (pstDma->OnCompleteCb) {
+        pstDma->OnCompleteCb(pstDma);
+      }
+    }
+  }
+}
 
 /*--------------------------------------------------------------------------------------------------------------------*/
 /* End of File */
